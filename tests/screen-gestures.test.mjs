@@ -909,6 +909,12 @@ test('dán từ máy này: copy ở máy này rồi Ctrl+V trên hình là dán 
     const keys = () => ws.sent.filter((m) => m.t === 'key').map((m) => `${m.vk}${m.down ? '↓' : '↑'}`);
     const CTRL_V = ['17↓', '86↓', '86↑', '17↑'];
     const ticks = async () => { for (let i = 0; i < 12; i += 1) await tick(); };
+    // Đọc tệp (Blob) chạy ở luồng nền: máy đang bận thì quá 12 lượt chờ, phép kiểm từng hỏng lúc được lúc không.
+    // Chờ tới khi điều kiện đúng (tối đa 5 giây) thay vì đếm lượt.
+    const until = async (fn) => {
+      for (const end = Date.now() + 5000; !fn() && Date.now() < end;) await new Promise((r) => setTimeout(r, 5));
+      return fn();
+    };
     const clip = ({ text = '', files = [], entries = [] }) => ({
       getData: (type) => (type === 'text/plain' ? text : ''),
       files,
@@ -948,8 +954,8 @@ test('dán từ máy này: copy ở máy này rồi Ctrl+V trên hình là dán 
     });
     reset();
     paste({ files: [new File(['xin chào'], 'ghi chú.txt'), new File([], 'Dự án')], entries: [null, dirEntry('Dự án', [fileEntry('a.txt', 'abc'), dirEntry('rỗng', [])])] });
-    await ticks();
-    const begin = ws.sent.find((m) => m.t === 'clip-files');
+    const begin = await until(() => ws.sent.find((m) => m.t === 'clip-files'));
+    await ticks(); // máy kia trả lời qua mạng, không bao giờ ngay trong lượt gửi
     assert.ok(begin.files.filter((f) => !f.dir).every((f) => f.mtime > 0), 'tệp kèm giờ sửa để máy kia giữ đúng như gốc');
     assert.deepEqual(begin.files.map(({ mtime, ...f }) => f), [
       { rel: 'ghi chú.txt', size: Buffer.byteLength('xin chào') },
@@ -961,7 +967,7 @@ test('dán từ máy này: copy ở máy này rồi Ctrl+V trên hình là dán 
     assert.ok(!badge.classList.contains('hidden'), 'đang dán thì hiện tiến độ và nút huỷ');
     assert.equal(ws.sent.some((m) => m.t === '#mẩu'), false, 'chờ máy báo sẵn sàng (đủ chỗ) rồi mới gửi mẩu');
     reply({ t: 'clip-ready', id: begin.id });
-    await ticks();
+    await until(() => ws.sent.some((m) => m.t === 'clip-end'));
     assert.equal(ws.sent.filter((m) => m.t === '#mẩu').length, 2, 'mỗi tệp một mẩu');
     assert.equal(ws.sent.find((m) => m.t === 'clip-end')?.paste, true);
     reply({ t: 'clip-done', id: begin.id, ok: true, count: 2 });

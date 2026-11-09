@@ -112,10 +112,14 @@ function describeSessions({ running, sessions }) {
 // Phiên mở hay chạy tiếp từ app chạy ngầm dưới đầu máy, không có cửa sổ nào trên máy: người ngồi tại
 // máy không thấy chúng, đóng VS Code cũng không đóng chúng. Khởi động lại đầu máy là đóng các phiên
 // đó, nên hỏi người ngồi tại máy (setup.cmd) trước; chạy nền không hỏi được thì báo rõ rồi dừng.
+// Lời nói với người ngồi tại máy (cửa sổ setup). ctx.say thay được, để phép kiểm không in chen vào luồng của
+// trình chạy kiểm (in thẳng ra stdout giữa chừng từng làm hỏng cả file kiểm, lúc được lúc không).
+const say = (ctx, text) => (ctx?.say ? ctx.say(text) : process.stdout.write(text));
+
 async function allowClosing(ctx, what) {
   const why = `Đầu máy đang giữ ${what}, mở hay chạy tiếp từ app. Các phiên này chạy ngầm, không có cửa sổ trên máy, nên đóng VS Code không đóng chúng.`;
   if (!ctx.ask) throw new Error(`${why} Đóng chúng trên app (màn của máy, danh sách phiên) rồi chạy lại setup.`);
-  process.stdout.write(`\n${why}\n`);
+  say(ctx, `\n${why}\n`);
   const yes = await ctx.ask('Đóng các phiên này để cài tiếp? Hội thoại vẫn còn, trên app bấm "Chạy lại" là làm tiếp. Gõ c rồi Enter để đóng, chỉ Enter để thôi: ');
   if (!yes) throw new Error(`chưa khởi động lại đầu máy vì còn ${what}. Đóng chúng trên app hay chạy lại setup và gõ c.`);
 }
@@ -634,7 +638,7 @@ export const STEPS = [
         }
         if (knows && !reply?.ok) throw new Error(reply?.error || 'đầu máy không trả lời lệnh tắt.');
         const closed = knows ? reply.data?.sessions?.length || 0 : 0;
-        if (closed) process.stdout.write(`Đã đóng ${closed} phiên mở từ app; muốn làm tiếp thì mở phiên trên app rồi bấm "Chạy lại".\n`);
+        if (closed) say(ctx, `Đã đóng ${closed} phiên mở từ app; muốn làm tiếp thì mở phiên trên app rồi bấm "Chạy lại".\n`);
         if (!knows) {
           // Đầu máy bản cũ chưa biết lệnh "shutdown": tắt tiến trình, hỏi trước nếu nó còn giữ phiên.
           for (const p of orbitProcesses().filter((x) => x.mode === 'node')) {

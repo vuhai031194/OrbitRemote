@@ -1,6 +1,8 @@
 // Lối vào của app: ghép đôi, định tuyến, nối luồng sự kiện, nạp phần tuỳ biến.
 
 import { h, clear, toast } from './lib/dom.js';
+import { icon } from './lib/icons.js';
+import { waitingSummary } from './lib/waiting.js';
 import { api, ApiError } from './lib/api.js';
 import { store } from './lib/store.js';
 import { loadExtension } from './lib/custom.js';
@@ -223,6 +225,34 @@ function showUpdateBar() {
   document.body.append(bar);
 }
 
+// Phiên đang chờ duyệt ở bất kỳ máy nào: một nút nổi trên mọi màn (trừ khi đang mở đúng phiên đó), chạm là tới phiên
+// chờ lâu nhất (lib/waiting.js). Kèm số trên tiêu đề trang và huy hiệu biểu tượng app (trình duyệt nào cho thì dùng).
+function trackWaiting() {
+  const label = h('span', { class: 'waiting-text' });
+  const pill = h('button', { class: 'waiting-pill hidden', type: 'button' }, icon('shield', 15), label);
+  document.body.append(pill);
+  let target = null;
+  pill.onclick = () => {
+    if (target) location.hash = `#/s/${target.id}`;
+  };
+  const update = () => {
+    const w = waitingSummary(store.sessions.values(), location.hash);
+    target = w.target;
+    label.textContent = w.text;
+    pill.classList.toggle('hidden', !w.target);
+    document.title = w.total ? `(${w.total}) Orbit Remote` : 'Orbit Remote';
+    try {
+      if (w.total) navigator.setAppBadge?.(w.total)?.catch?.(() => {});
+      else navigator.clearAppBadge?.()?.catch?.(() => {});
+    } catch {
+      // trình duyệt không cho huy hiệu
+    }
+  };
+  for (const type of ['session', 'session_removed', 'state']) store.on(type, update);
+  window.addEventListener('hashchange', update);
+  update();
+}
+
 let started = false;
 async function start() {
   const state = await api.get('/api/state');
@@ -233,6 +263,7 @@ async function start() {
     wide?.addEventListener?.('change', route); // kéo cửa sổ hẹp lại hay rộng ra: đổi giữa một và hai cột
     store.on('open-new-session', (preset) => openNewSession(preset));
     store.on('update-ready', showUpdateBar);
+    trackWaiting();
     store.connect();
     store.loadActions();
     store.loadTokens();

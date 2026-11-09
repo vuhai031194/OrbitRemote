@@ -527,7 +527,12 @@ export function openNewSession(preset = {}) {
             toast(err.message, 'error');
           }
         };
+        // Một lần bấm một lần mở: chạm hai lần lúc mạng chậm từng mở hai bản của cùng phiên.
+        let opening = false;
         const open = async (fork) => {
+          if (opening) return;
+          opening = true;
+          actions.classList.add('busy');
           try {
             const snap = await api.post(`/api/machines/${form.machineId}/open`, {
               claudeSessionId: t.claudeSessionId, cwd: t.cwd, fork, name: t.title.slice(0, 60), ...NEW_SESSION_DEFAULTS,
@@ -537,6 +542,9 @@ export function openNewSession(preset = {}) {
             opened(snap);
           } catch (err) {
             toast(err.message, 'error');
+          } finally {
+            opening = false;
+            actions.classList.remove('busy');
           }
         };
         add(actions,

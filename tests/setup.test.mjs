@@ -87,6 +87,7 @@ test('bộ cài khởi động lại đầu máy: phiên rảnh tự đóng, phi
   const ctx = (answer) => ({
     role: 'node',
     force: false,
+    say: () => {}, // không in chen vào luồng của trình chạy kiểm
     ask: answer === undefined ? null : async (q) => { asked.push(q); return answer; },
     pipeInUse: async () => up,
     spawnNode: () => { up = true; },

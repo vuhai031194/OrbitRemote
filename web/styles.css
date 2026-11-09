@@ -2732,3 +2732,10 @@ html.float-moving, html.float-moving * { cursor: var(--float-cursor, grabbing) !
 /* Thanh "Có bản mới" (app.js showUpdateBar): nổi giữa đáy, trên mọi màn. */
 .update-bar { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 8px 8px 8px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-elevated); color: var(--text); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); font-size: 0.92em; }
 .update-bar > span { min-width: 0; }
+
+/* Phiên đang chờ duyệt ở máy nào đó (app.js trackWaiting): nổi ngay dưới thanh trên cùng, trên mọi màn. */
+.waiting-pill { position: fixed; top: calc(var(--safe-top) + 62px); left: 50%; transform: translateX(-50%); z-index: 900; display: inline-flex; align-items: center; gap: 6px; max-width: calc(100vw - 32px); min-height: 40px; padding: 6px 16px; border: 1px solid var(--st-waiting); border-radius: 999px; background: var(--bg-elevated); color: var(--text); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35); font-size: 0.88em; font-weight: 600; cursor: pointer; }
+.waiting-pill > svg { flex: none; color: var(--st-waiting); }
+.waiting-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Đang gửi yêu cầu (mở phiên cũ): chặn bấm lần hai. */
+.busy { pointer-events: none; opacity: 0.6; }

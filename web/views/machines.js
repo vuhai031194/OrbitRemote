@@ -90,7 +90,12 @@ export function openExternalSheet(machineId, t) {
       toast(err.message, 'error');
     }
   };
+  // Một lần bấm một lần mở: chạm hai lần lúc mạng chậm từng mở hai bản của cùng phiên.
+  let opening = false;
   const open = async (fork) => {
+    if (opening) return;
+    opening = true;
+    body.classList.add('busy');
     try {
       const snap = await api.post(`/api/machines/${machineId}/open`, {
         claudeSessionId: t.claudeSessionId, cwd: t.cwd, fork, name: (t.title || 'Phiên mở lại').slice(0, 60),
@@ -100,6 +105,9 @@ export function openExternalSheet(machineId, t) {
       location.hash = `#/s/${snap.id}/m/${machineId}`; // mở từ danh sách của màn máy: quay lại về màn máy
     } catch (err) {
       toast(err.message, 'error');
+    } finally {
+      opening = false;
+      body.classList.remove('busy');
     }
   };
   add(body,
