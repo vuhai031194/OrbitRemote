@@ -12,6 +12,7 @@
 //   Chuột thật (trình duyệt máy tính) đi thẳng: rê, nhấp, cuộn.
 
 import { h, add, clear, toast } from '../lib/dom.js';
+import { api } from '../lib/api.js';
 import { icon } from '../lib/icons.js';
 import { ScreenClient } from '../lib/screen-client.js';
 import { createClipSync } from '../lib/clip-sync.js';
@@ -133,7 +134,27 @@ export function mountScreenPanel(container, machine) {
   const keybar = h('div', { class: 'keybar hidden' });
   const dock = h('div', { class: 'fs-dock' });
   const dockToggle = h('button', { class: 'fs-toggle', 'aria-label': 'Ẩn hoặc hiện nút', onclick: () => setDock(!dockShown()) }, icon('sliders', 20));
-  const stage = h('div', { class: 'screen-stage' }, viewport, overlay, holdBadge, clipBadge, dockToggle, dock, keybar, sink);
+  // Màn khoá, hộp thoại UAC: chương trình SYSTEM của máy (win-secure.cs) chỉ nhận bấm khi chủ máy cho phép trong ít
+  // phút; trạm ký quyền cho đúng máy này (hub.secureGrant). Nút hiện khi máy đang ở màn bảo mật mà chưa có quyền.
+  let grantUntil = 0;
+  let grantTimer = null;
+  let onSecure = false;
+  const grantBtn = h('button', { class: 'btn small primary secure-grant hidden', type: 'button', onclick: async () => {
+    grantBtn.disabled = true;
+    try {
+      const { until } = await api.post(`/api/machines/${machine.id}/secure-grant`, {});
+      grantUntil = until * 1000;
+      grantBtn.classList.add('hidden');
+      toast(`Bấm được màn khoá và hộp thoại UAC tới ${new Date(grantUntil).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}.`);
+      clearTimeout(grantTimer);
+      grantTimer = setTimeout(() => grantBtn.classList.toggle('hidden', !onSecure), Math.max(0, grantUntil - Date.now()));
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      grantBtn.disabled = false;
+    }
+  } }, icon('shield', 14), 'Cho bấm màn khoá/UAC 5 phút');
+  const stage = h('div', { class: 'screen-stage' }, viewport, overlay, holdBadge, clipBadge, dockToggle, dock, keybar, sink, grantBtn);
   const sourceSlot = h('div', { class: 'screen-source' });
   const toolbar = h('div', { class: 'screen-toolbar' });
   // Dòng khung hình/giây và tốc độ không đè lên hình: nằm dưới dãy nút, toàn màn hình thì vào khung,
@@ -317,6 +338,9 @@ export function mountScreenPanel(container, machine) {
     if (state === 'playing') {
       liveSource = info;
       retries = 0;
+      // Luồng của màn bảo mật mang secure; mở khoá xong máy phát lại luồng thường: thôi hiện nút cho bấm màn khoá.
+      onSecure = Boolean(info?.secure);
+      if (!onSecure) grantBtn.classList.add('hidden');
       // Máy quay lại chỉ để lấy khung gốc (gỡ đứng hình khi mạng vừa nghẽn): giữ hình đang có, khỏi che.
       if (!info?.quiet) setOverlay('Đang chờ khung hình đầu tiên…', { busy: true });
     } else if (state === 'frame') {
@@ -332,11 +356,15 @@ export function mountScreenPanel(container, machine) {
       // đây và bấm được, chỉ nhắc cách gõ mật khẩu. Không có thì Windows không cho xem hay bấm màn đó: báo
       // rõ, máy tự phát lại khi mở khoá xong (vẫn đang "phát", nên không hiện nút phát).
       if (info?.live) {
+        onSecure = true;
+        const granted = grantUntil > Date.now();
+        grantBtn.classList.toggle('hidden', granted);
+        const first = granted ? '' : 'Bấm "Cho bấm màn khoá/UAC" trước. ';
         toast(info.state === 'secure'
-          ? 'Máy đang hiện hộp thoại quản trị (UAC): bấm được ngay trên hình.'
+          ? `Máy đang hiện hộp thoại quản trị (UAC). ${first}Rồi bấm ngay trên hình.`
           : coarsePointer?.matches
-            ? 'Máy đang ở màn khoá: chạm vào hình cho hiện ô mật khẩu, mở bàn phím rồi gõ mật khẩu và Enter.'
-            : 'Máy đang ở màn khoá: bấm vào hình cho hiện ô mật khẩu, rồi gõ mật khẩu bằng bàn phím của máy này và Enter.');
+            ? `Máy đang ở màn khoá. ${first}Chạm vào hình cho hiện ô mật khẩu, mở bàn phím rồi gõ mật khẩu và Enter.`
+            : `Máy đang ở màn khoá. ${first}Bấm vào hình cho hiện ô mật khẩu, rồi gõ mật khẩu bằng bàn phím của máy này và Enter.`);
         return;
       }
       hud.classList.add('hidden');
@@ -1408,6 +1436,7 @@ export function mountScreenPanel(container, machine) {
       if (!playing) setOverlay(online ? '' : 'Máy đang tắt hoặc mất mạng.', { showPlay: online });
     },
     destroy() {
+      clearTimeout(grantTimer);
       document.removeEventListener('visibilitychange', onVisibility);
       document.removeEventListener('fullscreenchange', onFsChange);
       phoneLandscape?.removeEventListener?.('change', onOrientation);

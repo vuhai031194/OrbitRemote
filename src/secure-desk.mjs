@@ -14,7 +14,8 @@
 import net from 'node:net';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { isGrantKey } from './hub-identity.mjs';
 import { join } from 'node:path';
 import { STATE_DIR, TOOL_DIR, ensureDir } from './paths.mjs';
 
@@ -30,10 +31,19 @@ const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const SOURCE = join(TOOL_DIR, 'src', 'win-secure.cs');
 const CSC = join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
 
+// Khoá công khai cấp quyền bấm của trạm, đầu máy nhận qua đường nối đã xác thực (node-agent.mjs "hub_keys"); setup
+// chép nó vào thư mục của chương trình SYSTEM (grant.pub), kèm mã máy (machine.id).
+export const GRANT_PUB_STATE = join(STATE_DIR, 'secure-grant.pub');
+const SECURE_GRANT_PUB = join(SECURE_DIR, 'grant.pub');
+const SECURE_MACHINE_ID = join(SECURE_DIR, 'machine.id');
+
 // Dịch win-secure.cs vào thư mục trạng thái (tên theo dấu mã nguồn); trả về đường dẫn tệp .exe.
-export function buildSecureExe() {
+// fresh: xoá bản đã dịch rồi dịch lại (lúc cài): thư mục trạng thái người dùng ghi được, tệp trùng tên có sẵn ở đó
+// có thể là tệp ai đó đặt vào để được chép đi chạy bằng quyền SYSTEM. Kiểm tra trạng thái thì dùng bản có sẵn.
+export function buildSecureExe({ fresh = false } = {}) {
   const tag = createHash('sha256').update(readFileSync(SOURCE)).digest('hex').slice(0, 12);
   const out = join(ensureDir(join(STATE_DIR, 'bin')), `orbit-secure-${tag}.exe`);
+  if (fresh) rmSync(out, { force: true });
   if (existsSync(out)) return out;
   if (!existsSync(CSC)) throw new Error('Máy này thiếu csc.exe của .NET Framework 4.');
   const r = spawnSync(CSC, ['-nologo', '-optimize+', '-platform:x64', '-target:exe', '-r:System.Drawing.dll', `-out:${out}`, SOURCE], { windowsHide: true, encoding: 'utf8' });
@@ -177,8 +187,14 @@ export async function openSecureInput() {
 // Kịch bản PowerShell chạy bằng quyền quản trị (setup.mjs, một hộp thoại UAC): chép chương trình vào thư
 // mục chỉ quản trị viên ghi được, tạo khoá bí mật chỉ SYSTEM, Administrators và người cài (sid) đọc được,
 // đăng ký tác vụ SYSTEM chạy lúc bật máy rồi chạy ngay. Chạy lại là cập nhật (dừng tác vụ, chép bản mới).
-export function installScript({ exePath, userSid }) {
+// exeHash: SHA256 của bản vừa dịch; kiểm lại trên tệp đã chép vào thư mục chỉ quản trị viên ghi được, nên không ai
+// tráo được giữa lúc kiểm và lúc chạy. grantKey, machineId: khoá công khai cấp quyền của trạm và mã máy này
+// (win-secure.cs chỉ nhận lệnh bấm khi có quyền trạm ký cho đúng máy này).
+export function installScript({ exePath, userSid, exeHash, grantKey, machineId }) {
   if (!/^S-1-[\d-]+$/.test(userSid)) throw new Error(`Mã tài khoản lạ: ${userSid}`);
+  if (!/^[0-9a-f]{64}$/i.test(String(exeHash))) throw new Error('Thiếu mã băm của chương trình vừa dịch.');
+  if (!isGrantKey(grantKey)) throw new Error('Thiếu khoá cấp quyền của trạm.');
+  if (!/^[\w-]{4,40}$/.test(String(machineId))) throw new Error('Mã máy không hợp lệ.');
   return [
     "$ErrorActionPreference = 'Stop'",
     `$dir = ${q(SECURE_DIR)}`,
@@ -189,7 +205,11 @@ export function installScript({ exePath, userSid }) {
     // Thư mục: bỏ quyền thừa kế, chỉ SYSTEM và Administrators toàn quyền, Users chỉ đọc và chạy.
     'icacls $dir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null',
     "if ($LASTEXITCODE) { throw 'Không đặt được quyền cho thư mục.' }",
-    `Copy-Item -Force -LiteralPath ${q(exePath)} -Destination (Join-Path $dir 'orbit-secure.exe')`,
+    "$dst = Join-Path $dir 'orbit-secure.exe'",
+    `Copy-Item -Force -LiteralPath ${q(exePath)} -Destination $dst`,
+    `if ((Get-FileHash -Algorithm SHA256 -LiteralPath $dst).Hash -ne ${q(String(exeHash).toUpperCase())}) { Remove-Item -Force -LiteralPath $dst; throw 'Chương trình vừa chép không khớp bản vừa dịch (có thể đã bị tráo): dừng cài.' }`,
+    `[IO.File]::WriteAllText((Join-Path $dir 'grant.pub'), ${q(grantKey)})`,
+    `[IO.File]::WriteAllText((Join-Path $dir 'machine.id'), ${q(machineId)})`,
     "$key = Join-Path $dir 'secure.key'",
     'if (-not (Test-Path $key)) { $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [IO.File]::WriteAllText($key, (($b | ForEach-Object { $_.ToString(\'x2\') }) -join \'\')) }',
     // Khoá: chỉ SYSTEM, Administrators (toàn quyền) và người cài (đọc); Users không đọc được.
@@ -240,9 +260,29 @@ export async function secureStatus() {
   const current = fileHash(SECURE_EXE) === fileHash(built);
   const running = await secureAvailable();
   const task = scheduledTaskExists(SECURE_TASK);
+  const grant = existsSync(SECURE_GRANT_PUB) && existsSync(SECURE_MACHINE_ID);
   const parts = [];
   if (!current) parts.push('bản đã cài cũ hơn mã nguồn');
   if (!task) parts.push('thiếu tác vụ chạy lúc bật máy');
   if (!running) parts.push('chưa chạy hay không đọc được khoá');
-  return { installed: true, current, running, task, detail: parts.join('; ') || 'đang chạy, đúng bản mới nhất' };
+  if (!grant) parts.push('chưa có khoá cấp quyền của trạm (chưa bấm được màn khoá, UAC)');
+  return { installed: true, current, running, task, grant, detail: parts.join('; ') || 'đang chạy, đúng bản mới nhất' };
+}
+
+// Đưa một quyền bấm do trạm ký (hub-identity.mjs grant) cho chương trình SYSTEM. Trả hạn (giây Unix).
+export async function sendSecureGrant(payload, sig) {
+  const b64 = /^[A-Za-z0-9+/=]{1,700}$/;
+  if (!b64.test(String(payload)) || !b64.test(String(sig))) throw new Error('Quyền không hợp lệ.');
+  const s = await open(`grant ${payload} ${sig}`);
+  let line;
+  try {
+    ({ line } = await readLine(s));
+  } catch {
+    throw new Error('Phần xem màn khoá trên máy này là bản cũ, chưa nhận quyền bấm: chạy setup.cmd trên máy đó.');
+  } finally {
+    s.destroy();
+  }
+  const m = /^ok (\d+)$/.exec(String(line || ''));
+  if (!m) throw new Error('Phần xem màn khoá từ chối quyền (khoá cấp quyền chưa cài, hay của trạm khác): chạy setup.cmd trên máy đó.');
+  return { until: Number(m[1]) };
 }

@@ -40,7 +40,7 @@ import { findTailscale, readTailscaleStatus, tailnetFromStatus, tailnetUrls } fr
 import { APP_PROFILE_DIR, openAppWindow } from './pc-app.mjs';
 import { pullRepo, runSetup } from './setup.mjs';
 import { crashDecision, spawnMain, spawnMainLater } from './launch.mjs';
-import { loadHubKey } from './hub-identity.mjs';
+import { loadGrantKey, loadHubKey } from './hub-identity.mjs';
 import { REPO_HUB, publishRepoHub, repoHub, repoHubUrls } from './hub-decl.mjs';
 
 const VERSION = readJson(join(TOOL_DIR, 'package.json'), {}).version || '0';
@@ -209,6 +209,8 @@ async function runHub() {
   writeJsonAtomic(ROLE_FILE, { role: 'hub', since: new Date().toISOString() });
   const auth = new Auth();
   const hub = new Hub();
+  // Khoá ký quyền bấm màn khoá/UAC cho chương trình SYSTEM của các máy (hub-identity.mjs loadGrantKey).
+  hub.grantKey = loadGrantKey(join(STATE_DIR, 'hub-grant-key.json'));
   guardProcess('trạm', () => {
     hub.saveNow();
     auth.flushLastSeen();

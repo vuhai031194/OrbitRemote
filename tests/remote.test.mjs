@@ -55,7 +55,7 @@ const { Hub } = await import('../src/hub.mjs');
 const { Auth } = await import('../src/auth.mjs');
 const { NodeAgent } = await import('../src/node-agent.mjs');
 const { createServer } = await import('../src/server.mjs');
-const { loadHubKey, newNonce, verifyHub } = await import('../src/hub-identity.mjs');
+const { loadGrantKey, loadHubKey, newNonce, verifyHub } = await import('../src/hub-identity.mjs');
 const hubKey = loadHubKey(join(ROOT, 'hub-key.json'));
 const { runNodeLoop } = await import('../src/node-runner.mjs');
 const { startDiscoveryResponder, discoverHubs } = await import('../src/discovery.mjs');
@@ -142,6 +142,7 @@ async function call(path, body, method = body === undefined ? 'GET' : 'POST') {
 before(async () => {
   auth = new Auth(join(process.env.ORBIT_REMOTE_STATE, 'auth.json'));
   hub = new Hub();
+  hub.grantKey = loadGrantKey(join(ROOT, 'hub-grant-key.json')); // như main.mjs: máy nối vào nhận khoá cấp quyền
   server = createServer({ hub, auth, localSecret: 'test-secret', version: 'test', hubKey, hubInfo: () => ({ id: 'hubX', name: 'TramThu', urls: [] }), onRestart: () => { hubRestarts += 1; return 'restart.log'; } });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   port = server.address().port;
@@ -1947,4 +1948,34 @@ test('chuyển phiên sang máy khác: kiểm trước, commit tạm phần sử
   await waitFor(() => hub.sessions.get(id).snap.status === 'stopped', 'phiên ở máy C đóng');
   agentC.shutdown();
   connC.disconnect();
+});
+
+test('màn khoá/UAC: máy nối vào nhận khoá cấp quyền của trạm; bật trên app thì trạm ký quyền ngắn hạn cho đúng máy đó', async () => {
+  const { createPublicKey, verify } = await import('node:crypto');
+  const { GRANT_PUB_STATE } = await import('../src/secure-desk.mjs');
+  const { readFileSync, existsSync } = await import('node:fs');
+  await waitFor(() => existsSync(GRANT_PUB_STATE) && readFileSync(GRANT_PUB_STATE, 'utf8') === hub.grantKey.publicKey, 'máy A nhận khoá cấp quyền khi nối');
+
+  assert.notEqual((await call('/api/machines/mKhong/secure-grant', {})).status, 200, 'máy không có / đang tắt');
+
+  hub.machines.set('mSec01', { id: 'mSec01', name: 'May-Khoa', online: true, external: [] });
+  const orig = hub.machineRpc.bind(hub);
+  let sent = null;
+  hub.machineRpc = (id) => (id === 'mSec01' ? { request: async (m) => { sent = m; return { until: 1 }; } } : orig(id));
+  try {
+    const before = Math.floor(Date.now() / 1000);
+    const r = await call('/api/machines/mSec01/secure-grant', { seconds: 999999 });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(sent.op, 'secure_grant');
+    const payload = Buffer.from(sent.payload, 'base64');
+    const [tag, machine, until] = payload.toString().split('|');
+    assert.deepEqual([tag, machine], ['orbit-secure-grant', 'mSec01']);
+    assert.ok(Number(until) - before <= 15 * 60 && Number(until) > before, 'hạn ngắn, tối đa 15 phút dù xin dài hơn');
+    const raw = Buffer.from(hub.grantKey.publicKey, 'base64');
+    const key = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: raw.subarray(1, 33).toString('base64url'), y: raw.subarray(33).toString('base64url') }, format: 'jwk' });
+    assert.equal(verify('sha256', payload, { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(sent.sig, 'base64')), true);
+  } finally {
+    hub.machineRpc = orig;
+    hub.machines.delete('mSec01');
+  }
 });

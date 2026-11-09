@@ -450,6 +450,11 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
         return sendJson(res, 200, await hub.transcriptAction(machineId, parts[4], parts[5]));
       }
       if (method === 'GET' && parts[3] === 'dirs') return sendJson(res, 200, await hub.machineDirs(machineId, url.searchParams.get('path') || ''));
+      // Cho chương trình SYSTEM của máy bấm màn khoá và hộp thoại UAC trong ít phút (hub.secureGrant).
+      if (method === 'POST' && parts[3] === 'secure-grant') {
+        const body = await readBody(req);
+        return sendJson(res, 200, await hub.secureGrant(machineId, Number(body.seconds) || undefined));
+      }
       if (method === 'GET' && parts[3] === 'temps') return sendJson(res, 200, await hub.machineTemps(machineId));
       // Nút "Tệp" ở màn chỉ xem một phiên ngoài app: GET /api/machines/<máy>/tree/<mã phiên>?p=, .../tree-file/<mã phiên>?p=
       if (method === 'GET' && parts[3] === 'tree' && parts[4]) {

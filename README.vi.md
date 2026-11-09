@@ -40,7 +40,9 @@ khiển màn hình máy, cho các phiên nhắn tin và làm việc nhóm với 
   phóng to, kéo thả, bàn phím iPhone gõ thẳng vào máy kể cả tiếng Việt, dãy phím Ctrl, Alt, Win, F5...
 - **Xoay theo điện thoại**: màn hình hay cửa sổ đổi ngang dọc cho khớp chiều đang xem, thôi xem là trả như cũ.
 - **Clipboard hai chiều** như Remote Desktop: dán chữ, tệp, cả thư mục sang máy đang xem và chép ngược về.
-- **Xem và gõ mật khẩu ở màn khoá**, bấm bảng UAC (tuỳ chọn, cài một chương trình chạy bằng quyền SYSTEM).
+- **Xem và gõ mật khẩu ở màn khoá**, bấm bảng UAC (tuỳ chọn, cài một chương trình chạy bằng quyền SYSTEM). Chỉ bấm, gõ
+  được trong vài phút sau khi bạn chạm **Cho bấm màn khoá/UAC 5 phút** trên app: trạm ký một quyền ngắn hạn cho đúng máy
+  đó, nên chương trình khác trên máy không dùng được chương trình SYSTEM này để tự bấm "Yes" ở bảng UAC.
 - **Phiên nổi**: chat với một phiên trong khung nổi ngay trên màn hình đang xem.
 
 **Quản lý máy**

@@ -298,6 +298,8 @@ export class Hub extends EventEmitter {
     // phải tự hỏi máy chủ Anthropic. Đầu máy bản cũ không hiểu lệnh thì thôi.
     const models = modelTable();
     if (models.source === 'api') rpc?.request({ op: 'models_set', table: { at: models.at, models: models.models } }).catch(() => {});
+    // Khoá công khai cấp quyền bấm màn khoá/UAC (hub-identity.mjs): máy giữ lại cho setup cài vào chương trình SYSTEM.
+    if (this.grantKey) rpc?.request({ op: 'hub_keys', grantKey: this.grantKey.publicKey }).catch(() => {});
 
     // Đối chiếu: phiên trạm tưởng đang chạy trên máy này mà đầu máy không còn giữ
     // thì đã dừng (đầu máy khởi động lại chẳng hạn).
@@ -1061,6 +1063,21 @@ export class Hub extends EventEmitter {
   }
 
   // Thư mục con của `path` trên máy đó (trống: các chỗ bắt đầu và ổ đĩa), cho nút "Duyệt" khi mở phiên.
+  // Chủ máy bật "cho điều khiển màn khoá/UAC" trên app: ký một quyền ngắn hạn cho đúng máy đó (hub-identity.mjs) và
+  // đưa xuống chương trình SYSTEM của máy (secure-desk.mjs sendSecureGrant). Trả { until } (giây Unix).
+  async secureGrant(machineId, seconds) {
+    if (!this.grantKey) throw new Error('Trạm này chưa có khoá cấp quyền.');
+    const m = this.machines.get(machineId);
+    if (!m?.online) throw new Error('Máy đang tắt hay mất kết nối.');
+    const g = this.grantKey.grant(machineId, seconds);
+    try {
+      return await this.machineRpc(machineId).request({ op: 'secure_grant', payload: g.payload, sig: g.sig });
+    } catch (err) {
+      if (/không hiểu lệnh/.test(err.message)) throw new Error('Máy này cần setup bản Orbit Remote mới để cho bấm màn khoá, UAC.');
+      throw err;
+    }
+  }
+
   async machineDirs(machineId, path) {
     try {
       return await this.machineRpc(machineId).request({ op: 'dirs', path: String(path || '').slice(0, 1000) });

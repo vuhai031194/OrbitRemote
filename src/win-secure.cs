@@ -18,6 +18,14 @@
 //                    in            trả "ok" rồi nhận từng dòng lệnh bấm như win-input.cs: m x y | r dx dy |
 //                                  d b | u b | w n | k vk 1|0 e | t base64, bấm vào màn đang nhận phím chuột
 //                    ping          in pong
+//                    grant p s     quyền bấm do trạm ký (p: nội dung base64, s: chữ ký base64), trả "ok <hạn>" hay "bad"
+//   check-grant <tệp khoá công khai> <mã máy> <p> <s>   chỉ kiểm một quyền rồi in ok/bad (cho phép kiểm, không làm gì khác)
+//
+// Bấm (lệnh "in") chỉ có hiệu lực khi đang có quyền còn hạn. Khoá secure.key người dùng đọc được (đầu máy cần nó
+// để xem màn khoá), nên mọi chương trình chạy bằng tài khoản người dùng cũng nối được tới đây; bấm được vào hộp
+// thoại UAC là lên quyền quản trị. Quyền thì chỉ trạm ký được (khoá ECDSA P-256 riêng của trạm; khoá công khai
+// grant.pub và mã máy machine.id nằm cạnh chương trình, chỉ quản trị viên ghi được): trạm chỉ ký khi chủ máy bật
+// trên app, cho đúng máy này, hạn tối đa 15 phút.
 //
 // Chỉ nhận số và một tập lệnh cố định: không chạy chương trình nào khác, không đọc ghi tệp nào theo lệnh,
 // không nghe ngoài 127.0.0.1. Dịch bằng csc.exe của .NET Framework 4 (C# 5).
@@ -32,6 +40,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 
@@ -93,7 +102,60 @@ static class OrbitSecure {
     int port = args.Length > 1 ? Clamp(ParseInt(args[1], DEFAULT_PORT), 1024, 65535) : DEFAULT_PORT;
     if (mode == "serve") Serve(port);
     else if (mode == "desk") Desk(port, args.Length > 2 ? args[2] : Path.Combine(AppDir(), "secure.key"));
-    else Console.Error.WriteLine("Cách dùng: orbit-secure serve [cổng] | desk [cổng] [tệp khoá]");
+    else if (mode == "check-grant" && args.Length == 5) {
+      long until;
+      bool ok = VerifyGrant(ReadText(args[1]), args[2], args[3], args[4], out until);
+      Console.WriteLine(ok ? "ok " + until : "bad");
+      Environment.Exit(ok ? 0 : 1);
+    }
+    else Console.Error.WriteLine("Cách dùng: orbit-secure serve [cổng] | desk [cổng] [tệp khoá] | check-grant <tệp khoá công khai> <mã máy> <p> <s>");
+  }
+
+  static string ReadText(string file) {
+    try { return File.ReadAllText(file).Trim(); } catch { return ""; }
+  }
+
+  // ---- Quyền bấm do trạm ký -------------------------------------------------------------------------
+  // Nội dung: "orbit-secure-grant|<mã máy>|<hạn, giây Unix>|<số ngẫu nhiên>", ký ECDSA P-256 + SHA-256, chữ ký
+  // 64 byte r||s (IEEE P1363, đúng dạng CNG đọc). Khoá công khai: base64 của điểm không nén 65 byte (04||X||Y).
+  const long GRANT_MAX_SECONDS = 15 * 60;
+
+  static bool VerifyGrant(string pubB64, string machineId, string payloadB64, string sigB64, out long until) {
+    until = 0;
+    try {
+      if (string.IsNullOrEmpty(machineId)) return false;
+      byte[] pub = Convert.FromBase64String(pubB64);
+      byte[] sig = Convert.FromBase64String(sigB64);
+      byte[] payload = Convert.FromBase64String(payloadB64);
+      if (pub.Length != 65 || pub[0] != 4 || sig.Length != 64 || payload.Length > 512) return false;
+      byte[] blob = new byte[8 + 64];
+      BitConverter.GetBytes(0x31534345).CopyTo(blob, 0); // BCRYPT_ECDSA_PUBLIC_P256_MAGIC ("ECS1")
+      BitConverter.GetBytes(32).CopyTo(blob, 4);
+      Array.Copy(pub, 1, blob, 8, 64);
+      using (CngKey k = CngKey.Import(blob, CngKeyBlobFormat.EccPublicBlob))
+      using (ECDsaCng ec = new ECDsaCng(k)) {
+        ec.HashAlgorithm = CngAlgorithm.Sha256;
+        if (!ec.VerifyData(payload, sig)) return false;
+      }
+      string[] f = Encoding.UTF8.GetString(payload).Split('|');
+      if (f.Length != 4 || f[0] != "orbit-secure-grant" || f[1] != machineId) return false;
+      long t;
+      if (!long.TryParse(f[2], out t)) return false;
+      long now = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+      if (t <= now || t - now > GRANT_MAX_SECONDS) return false;
+      until = t;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  static readonly object grantLock = new object();
+  static long grantUntil; // giây Unix: bấm được tới lúc này
+
+  static bool Granted() {
+    long now = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+    lock (grantLock) return grantUntil > now;
   }
 
   static string AppDir() { return Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName); }
@@ -185,9 +247,19 @@ static class OrbitSecure {
         if (a[0] == "ping") Reply(net, "pong");
         else if (a[0] == "state") Reply(net, DesktopState());
         else if (a[0] == "cap" && a.Length >= 9) Capture(net, a);
+        else if (a[0] == "grant" && a.Length == 3) {
+          long until;
+          if (VerifyGrant(ReadText(Path.Combine(AppDir(), "grant.pub")), ReadText(Path.Combine(AppDir(), "machine.id")), a[1], a[2], out until)) {
+            lock (grantLock) grantUntil = Math.Max(grantUntil, until);
+            Reply(net, "ok " + until);
+          } else {
+            Reply(net, "bad");
+          }
+        }
         else if (a[0] == "in") {
           Reply(net, "ok");
           for (string cmd; (cmd = reader.ReadLine()) != null;) {
+            if (!Granted()) continue; // chưa có quyền, hay quyền đã hết hạn: bỏ lệnh bấm
             try { Input(cmd.Split(' ')); } catch { }
           }
         }

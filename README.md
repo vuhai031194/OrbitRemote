@@ -47,7 +47,9 @@ they run on different machines.
 - **Rotate with the phone**: the screen or window switches between landscape and portrait to match how you hold the
   phone, and is restored when you stop watching.
 - **Two-way clipboard** like Remote Desktop: paste text, files and whole folders into the viewed machine and copy them back.
-- **See and type on the lock screen**, click UAC prompts (optional helper that runs as SYSTEM).
+- **See and type on the lock screen**, click UAC prompts (optional helper that runs as SYSTEM). Input there only works for
+  a few minutes after you tap **Cho bấm màn khoá/UAC 5 phút** in the app: the hub signs a short grant for that machine,
+  so other programs on the machine cannot use the helper to approve UAC prompts.
 - **Floating session**: chat with a session in a floating panel on top of the screen you are watching.
 
 **Machine management**

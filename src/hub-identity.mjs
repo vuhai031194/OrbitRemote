@@ -69,3 +69,46 @@ export async function checkHub(url, { hubId, hubKey }, { fetchImpl = fetch, time
 }
 
 export const newNonce = () => randomBytes(16).toString('hex');
+
+// ---- Quyền bấm màn bảo mật (màn khoá, hộp thoại UAC) ---------------------------------------------------
+// Chương trình SYSTEM của máy (win-secure.cs) chỉ nhận lệnh bấm khi có quyền còn hạn do trạm ký. Ký bằng ECDSA P-256
+// (không phải khoá Ed25519 ở trên): .NET Framework của chương trình đó không kiểm được Ed25519, còn P-256 thì Windows
+// (CNG) kiểm sẵn. Khoá công khai là điểm không nén 65 byte (04||X||Y) dạng base64; chữ ký 64 byte r||s (IEEE P1363).
+export const GRANT_DEFAULT_SECONDS = 5 * 60;
+export const GRANT_MAX_SECONDS = 15 * 60;
+
+function grantKeyFrom(data) {
+  const priv = createPrivateKey(data.privateKey);
+  const jwk = createPublicKey(priv).export({ format: 'jwk' });
+  const publicKey = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]).toString('base64');
+  return {
+    publicKey,
+    // Quyền cho máy `machineId` tới `now + seconds`: { payload, sig } (base64) gửi xuống máy, và hạn (giây Unix).
+    grant(machineId, seconds = GRANT_DEFAULT_SECONDS, now = Date.now()) {
+      if (!/^[\w-]{4,40}$/.test(String(machineId))) throw new Error('Mã máy không hợp lệ.');
+      const until = Math.floor(now / 1000) + Math.min(Math.max(30, Math.floor(seconds)), GRANT_MAX_SECONDS);
+      const payload = Buffer.from(`orbit-secure-grant|${machineId}|${until}|${randomBytes(8).toString('hex')}`);
+      const sig = sign('sha256', payload, { key: priv, dsaEncoding: 'ieee-p1363' });
+      return { payload: payload.toString('base64'), sig: sig.toString('base64'), until };
+    },
+  };
+}
+
+// Như loadHubKey: tạo một lần, ghi kèm bản dự phòng; file hỏng thì nạp bản dự phòng.
+export function loadGrantKey(file) {
+  const { value: saved } = readStateJson(file, null);
+  if (saved?.privateKey) {
+    try {
+      return grantKeyFrom(saved);
+    } catch {
+      // khoá hỏng: tạo mới bên dưới
+    }
+  }
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const data = { privateKey: privateKey.export({ type: 'pkcs8', format: 'pem' }), createdAt: new Date().toISOString() };
+  writeJsonAtomic(file, data);
+  writeJsonAtomic(`${file}.bak`, data);
+  return grantKeyFrom(data);
+}
+
+export const isGrantKey = (s) => typeof s === 'string' && /^[A-Za-z0-9+/]{86}[A-Za-z0-9+/=]{2}$/.test(s) && Buffer.from(s, 'base64').length === 65;

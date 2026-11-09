@@ -74,12 +74,15 @@ test('luồng màn hình: máy khoá mà có phần xem màn khoá thì báo app
 });
 
 test('kịch bản cài bằng quyền quản trị: thư mục chỉ quản trị viên ghi được, khoá chỉ SYSTEM, Administrators và người cài đọc được, tác vụ SYSTEM lúc bật máy; mã tài khoản lạ thì từ chối', () => {
-  const s = desk.installScript({ exePath: 'C:\\x\\orbit-secure.exe', userSid: 'S-1-5-21-1-2-3-1001' });
+  // Khoá cấp quyền và mã máy: tests/secure-grant.test.mjs kiểm kỹ; ở đây chỉ cần đầu vào hợp lệ.
+  const grantKey = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString('base64');
+  const extra = { exeHash: 'ab'.repeat(32), grantKey, machineId: '0a430871dc' };
+  const s = desk.installScript({ exePath: 'C:\\x\\orbit-secure.exe', userSid: 'S-1-5-21-1-2-3-1001', ...extra });
   assert.match(s, /icacls \$dir \/inheritance:r \/grant:r "\*S-1-5-18:\(OI\)\(CI\)F" "\*S-1-5-32-544:\(OI\)\(CI\)F" "\*S-1-5-32-545:\(OI\)\(CI\)RX"/);
   assert.match(s, /icacls \$key \/inheritance:r \/grant:r "\*S-1-5-18:F" "\*S-1-5-32-544:F" "\*S-1-5-21-1-2-3-1001:R"/);
   assert.equal((s.match(/if \(\$LASTEXITCODE\) \{ throw/g) || []).length, 2, 'icacls lỗi thì dừng, không để quyền sai');
   assert.match(s, /New-ScheduledTaskPrincipal -UserId 'SYSTEM'/);
   assert.match(s, /New-ScheduledTaskTrigger -AtStartup/);
   assert.match(s, /-Argument 'serve 18799'/, 'tác vụ nhận cổng từ JS, không để chương trình tự đoán cổng mặc định');
-  assert.throws(() => desk.installScript({ exePath: 'C:\\x.exe', userSid: 'S-1-5-21"; rm -r C:\\' }), /Mã tài khoản lạ/);
+  assert.throws(() => desk.installScript({ exePath: 'C:\\x.exe', userSid: 'S-1-5-21"; rm -r C:\\', ...extra }), /Mã tài khoản lạ/);
 });

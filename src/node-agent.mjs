@@ -22,6 +22,8 @@ import { localWakeInfo, sendMagicPacket } from './wake.mjs';
 import { cancelShutdown, scheduleShutdown } from './power.mjs';
 import { Rpc, answer } from './rpc.mjs';
 import { ScreenServer, ffmpegCommand } from './screen.mjs';
+import { GRANT_PUB_STATE, sendSecureGrant } from './secure-desk.mjs';
+import { isGrantKey } from './hub-identity.mjs';
 import { InputHelper } from './input.mjs';
 import { controlTimeoutMs, remoteOp } from './remote-ops.mjs';
 import { Sensors } from './sensors.mjs';
@@ -467,6 +469,17 @@ export class NodeAgent {
       case 'models_set':
         // Bảng bản model mới nhất trạm phát xuống (models.mjs): phiên mở sau và hook trên máy này dùng ngay.
         return reply(() => ({ changed: applyTable(message.table) }));
+      case 'hub_keys':
+        // Khoá công khai cấp quyền bấm màn khoá/UAC của trạm, tới qua đường nối đã xác thực (hub-identity.mjs): setup
+        // chép nó cho chương trình SYSTEM của máy này (secure-desk.mjs installScript).
+        return reply(() => {
+          if (!isGrantKey(message.grantKey)) fail('Khoá cấp quyền không hợp lệ.');
+          writeFileSync(GRANT_PUB_STATE, message.grantKey);
+          return { ok: true };
+        });
+      case 'secure_grant':
+        // Quyền bấm màn khoá/UAC trạm vừa ký khi chủ máy bật trên app: đưa thẳng cho chương trình SYSTEM.
+        return reply(() => sendSecureGrant(message.payload, message.sig));
       case 'set_model':
         return reply(() => this.mustGet(message.id).setModel(message.model));
       // Tệp trong thư mục làm việc của một phiên (nút "Tệp", files.mjs): root là thư mục trạm đưa xuống (phiên app giữ);

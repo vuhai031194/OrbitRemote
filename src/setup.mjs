@@ -17,9 +17,11 @@ import { join } from 'node:path';
 import { resolveClaude } from './claude-session.mjs';
 import { DDAGRAB_UNSUPPORTED, FFMPEG_WINGET_ID, GDI_MAX_FPS, captureInput, findFfmpeg, ffmpegUsable } from './ffmpeg.mjs';
 import { InputHelper } from './input.mjs';
-import { PIPE_PATH, TOOL_DIR, writeJsonAtomic } from './paths.mjs';
+import { PIPE_PATH, STATE_DIR, TOOL_DIR, writeJsonAtomic } from './paths.mjs';
+import { isGrantKey, loadGrantKey } from './hub-identity.mjs';
+import { machineIdentity } from './node-agent.mjs';
 import { APP_ICON_FILE, APP_LAUNCHER_FILE, findAppBrowser, installShortcuts, launcherScript, readShortcuts } from './pc-app.mjs';
-import { buildSecureExe, installScript, secureAvailable, secureStatus } from './secure-desk.mjs';
+import { GRANT_PUB_STATE, buildSecureExe, fileHash, installScript, secureAvailable, secureStatus } from './secure-desk.mjs';
 import { SCREEN_PORT } from './screen.mjs';
 import { LHM_VERSION, LHM_ZIP_SHA256, LHM_ZIP_URL, SENSORS_PORT, SENSORS_SOURCE, askSensors, pickHelperItems, sensorsVersion } from './sensors.mjs';
 import { findTailscale, readTailscaleStatus, tailnetFromStatus } from './tailnet.mjs';
@@ -412,12 +414,21 @@ export const STEPS = [
     admin: true,
     check: async () => {
       const s = await secureStatus();
-      return { ok: Boolean(s.installed && s.current && s.running && s.task), detail: s.detail };
+      return { ok: Boolean(s.installed && s.current && s.running && s.task && s.grant), detail: s.detail };
     },
-    fix: async () => {
-      const exePath = buildSecureExe();
+    fix: async (ctx) => {
+      // Khoá công khai cấp quyền bấm của trạm: đầu máy ghi lại khi nối trạm (hub_keys); máy giữ trạm thì đọc thẳng
+      // khoá của trạm (cùng tệp trạm dùng).
+      let grantKey = '';
+      try {
+        grantKey = readFileSync(GRANT_PUB_STATE, 'utf8').trim();
+      } catch {
+        if (ctx?.role === 'hub') grantKey = loadGrantKey(join(STATE_DIR, 'hub-grant-key.json')).publicKey;
+      }
+      if (!isGrantKey(grantKey)) throw new Error('máy này chưa nhận khoá cấp quyền của trạm: chạy run.cmd để máy nối trạm một lần rồi chạy lại setup.');
+      const exePath = buildSecureExe({ fresh: true }); // không dùng tệp có sẵn trong thư mục người dùng ghi được
       const sid = (powershell('[Security.Principal.WindowsIdentity]::GetCurrent().User.Value').stdout || '').trim();
-      const res = powershell(installScript({ exePath, userSid: sid }), { admin: true, timeout: 120000 });
+      const res = powershell(installScript({ exePath, userSid: sid, exeHash: fileHash(exePath), grantKey, machineId: machineIdentity().id }), { admin: true, timeout: 120000 });
       if (res.status !== 0) throw new Error('chưa được quyền quản trị (hộp thoại UAC bị từ chối hay bị đóng).');
       // Tác vụ vừa chạy: chờ nó dựng chương trình trong phiên này (vài giây) rồi mới kiểm.
       for (let i = 0; i < 10 && !(await secureAvailable()); i += 1) await sleep(1000);
