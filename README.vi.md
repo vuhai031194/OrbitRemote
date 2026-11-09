@@ -6,7 +6,7 @@
 khiển màn hình máy, cho các phiên nhắn tin và làm việc nhóm với nhau, kể cả khi chúng chạy trên những máy khác nhau.
 
 - App là một **PWA** (trang web cài ra màn hình chính): không cần App Store, không cần tài khoản Apple Developer.
-- **Không dùng thư viện ngoài nào**, chỉ cần Node.js 20 trở lên.
+- **Không dùng thư viện ngoài nào**, chỉ cần Node.js 22 trở lên.
 - Dữ liệu chỉ đi giữa các máy của bạn. Khi ra ngoài, app vào trạm qua **Tailscale** (mạng riêng của chính bạn).
 - Giao diện app hiện bằng tiếng Việt.
 
@@ -69,7 +69,7 @@ khiển màn hình máy, cho các phiên nhắn tin và làm việc nhóm với 
 - **Windows 10 hay 11** cho đầy đủ tính năng (màn hình, chuột phím, tắt bật máy, nhiệt độ). Bộ cài và tự chạy hiện chỉ
   làm cho Windows; trên macOS hay Linux thì chạy tay `node src/main.mjs node` (phần trạm, phiên và nhắn tin, chưa kiểm kỹ
   ngoài Windows).
-- **Node.js 20+**, **Git**, **Claude Code** đã đăng nhập. `setup.cmd` tự cài những thứ còn thiếu bằng winget, kể cả
+- **Node.js 22+**, **Git**, **Claude Code** đã đăng nhập. `setup.cmd` tự cài những thứ còn thiếu bằng winget, kể cả
   `ffmpeg`.
 - **Tailscale** (không bắt buộc) nếu muốn dùng khi ra ngoài.
 
@@ -97,7 +97,7 @@ bước trên máy thật, thiếu thì cài và kiểm lại:
 
 | Bước | Ghi chú |
 |---|---|
-| Node.js 20+, Git, Claude Code | Cài bằng winget hay npm. Đăng nhập Claude Code thì gõ `claude` một lần (chỉ nhắc). |
+| Node.js 22+, Git, Claude Code | Cài bằng winget hay npm. Đăng nhập Claude Code thì gõ `claude` một lần (chỉ nhắc). |
 | `ffmpeg` có `ddagrab`, quay thử một khung | Để xem màn hình. Thử đúng chuỗi lùi DXGI rồi GDI, nén phần cứng rồi `libx264`. |
 | Chuột và phím | Dịch `src/win-input.cs` bằng `csc.exe` có sẵn trong Windows. |
 | Màn khoá (không bắt buộc) | Một hộp thoại UAC: cài `src/win-secure.cs` thành tác vụ "Orbit Remote Secure Desktop" chạy bằng SYSTEM. |

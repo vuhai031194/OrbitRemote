@@ -285,10 +285,11 @@ try {
 export const STEPS = [
   {
     id: 'node',
-    title: 'Node.js 20 trở lên',
+    // Node 20 đã hết hạn hỗ trợ (30/4/2026); 22 là bản thấp nhất được kiểm (CI chạy 22 và 24).
+    title: 'Node.js 22 trở lên',
     check: () => {
       const major = Number(process.versions.node.split('.')[0]);
-      return { ok: major >= 20, detail: `v${process.versions.node}${major >= 20 ? '' : ' (cần 20 trở lên: winget install -e --id OpenJS.NodeJS.LTS)'}` };
+      return { ok: major >= 22, detail: `v${process.versions.node}${major >= 22 ? '' : ' (cần 22 trở lên: winget install -e --id OpenJS.NodeJS.LTS)'}` };
     },
   },
   {

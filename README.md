@@ -7,7 +7,7 @@ permissions, view and control each machine's screen, and let sessions message ea
 they run on different machines.
 
 - The app is a **PWA** (a web page you add to your home screen): no App Store, no Apple Developer account.
-- **No external dependencies**, only Node.js 20 or newer.
+- **No external dependencies**, only Node.js 22 or newer.
 - Data only travels between your own machines. Away from home, the app reaches the hub through **Tailscale** (your own
   private network).
 - The app interface is currently in Vietnamese. This README gives the Vietnamese label next to each button it mentions.
@@ -82,7 +82,7 @@ they run on different machines.
 - **Windows 10 or 11** for the full feature set (screen, mouse and keyboard, power, temperatures). The installer and
   autostart only support Windows today; on macOS or Linux run `node src/main.mjs node` by hand (hub, sessions and
   messaging; not tested much outside Windows).
-- **Node.js 20+**, **Git**, and **Claude Code** signed in. `setup.cmd` installs whatever is missing with winget, including
+- **Node.js 22+**, **Git**, and **Claude Code** signed in. `setup.cmd` installs whatever is missing with winget, including
   `ffmpeg`.
 - **Tailscale** (optional) to use the app away from home.
 
@@ -111,7 +111,7 @@ a phone with a QR code** (*Cài đặt → Ghép điện thoại bằng mã QR*)
 
 | Step | Notes |
 |---|---|
-| Node.js 20+, Git, Claude Code | Installed with winget or npm. Sign in to Claude Code by running `claude` once (reminder only). |
+| Node.js 22+, Git, Claude Code | Installed with winget or npm. Sign in to Claude Code by running `claude` once (reminder only). |
 | `ffmpeg` with `ddagrab`, one test frame | For screen view. Tries the same fallback chain as the stream: DXGI then GDI, hardware encoder then `libx264`. |
 | Mouse and keyboard | Compiles `src/win-input.cs` with the `csc.exe` that ships with Windows. |
 | Lock screen (optional) | One UAC prompt: installs `src/win-secure.cs` as the "Orbit Remote Secure Desktop" task running as SYSTEM. |
