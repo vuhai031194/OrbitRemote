@@ -65,3 +65,39 @@ test('gửi tin giữa các phiên chỉ được nhân danh phiên chạy trên
   assert.equal(reply.ok, false);
   assert.match(reply.error, /không chạy trên máy gửi lệnh/);
 });
+
+test('nhắn giữa các phiên: cùng nhóm, được chủ dự án tag, hay trả lời người vừa nhắn; gửi "*" chỉ tới phiên được phép; quyền còn sau khi trạm khởi động lại', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orbit-contacts-'));
+  try {
+    const hub = new Hub({ stateDir: dir });
+    for (const id of ['a', 'b', 'c', 'd']) {
+      hub.sessions.set(id, { snap: { id, name: id.toUpperCase(), status: 'idle', machineId: 'm1', machine: 'M' }, buffer: [], seq: 0, history: null });
+    }
+    hub.groups.groupOf = (id) => (['a', 'c'].includes(id) ? { id: 'g1', name: 'Nhóm', members: [{ id: 'a' }, { id: 'c' }] } : null);
+    const sent = [];
+    hub.machineRpc = () => ({ request: async (m) => { sent.push(m.id); return {}; } });
+    hub.sessionRpc = () => ({ request: async () => ({}) });
+
+    assert.equal(hub.mayMessage('a', 'c'), true, 'cùng nhóm');
+    assert.equal(hub.mayMessage('a', 'b'), false);
+    await assert.rejects(hub.route('a', 'B', 'làm việc này'), /chưa được nhắn cho "B"/);
+
+    const all = await hub.route('a', '*', 'gửi mọi người');
+    assert.deepEqual(all.delivered.map((x) => x.id), ['c'], '"*" chỉ tới phiên được phép');
+
+    await hub.sendToSession('a', 'nhờ @B', { kind: 'user', name: 'Tôi' }, null, [{ id: 'b', tag: 'B' }]);
+    assert.equal(hub.mayMessage('a', 'b'), true, 'chủ dự án tag B trong tin gửi A');
+    await hub.sendToSession('d', 'nhờ @B', { kind: 'session', name: 'A' }, null, [{ id: 'b', tag: 'B' }]);
+    assert.equal(hub.mayMessage('d', 'b'), false, 'chỉ tag của chủ dự án mới cho phép');
+
+    await hub.route('a', 'b', 'chào B');
+    assert.equal(hub.mayMessage('b', 'a'), true, 'B trả lời được A');
+    assert.equal(hub.mayMessage('b', 'd'), false);
+
+    assert.equal(hub.saveNow(), true);
+    const again = new Hub({ stateDir: dir });
+    assert.equal(again.mayMessage('a', 'b'), true, 'quyền còn sau khi trạm khởi động lại');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

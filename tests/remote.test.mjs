@@ -417,8 +417,17 @@ test('hai máy: phiên ở máy A nhắn cho phiên ở máy B qua vỏ MCP th�
   assert.ok(dir.some((s) => s.name === 'Beta' && s.machine === 'MayB'), 'thấy phiên ở máy kia');
   assert.ok(dir.some((s) => s.id === a.id && s.self), 'đánh dấu chính mình');
 
+  // Chưa ai cho phép: phiên không nhắn được cho phiên ngoài nhóm (hub.mjs mayMessage).
+  const refused = await rpc(104, 'tools/call', { name: 'orbit_remote_send', arguments: { to: 'Beta@MayB', text: 'chưa được phép' } });
+  assert.match(JSON.stringify(refused), /chưa được nhắn cho \\"Beta\\"/);
+  assert.ok(!hub.sessions.get(b.data.id).buffer.some((e) => e.t === 'user' && e.text?.includes('chưa được phép')), 'tin bị chặn không tới B');
+  // Chủ dự án tag Beta trong tin gửi cho Alpha: từ đó Alpha nhắn được cho Beta.
+  const tag = await call(`/api/sessions/${a.id}/send`, { text: 'nhờ @Beta xem giúp', mentions: [{ id: b.data.id, tag: 'Beta' }] });
+  assert.equal(tag.status, 200, JSON.stringify(tag.data));
+
   const sent = await rpc(4, 'tools/call', { name: 'orbit_remote_send', arguments: { to: 'Beta@MayB', text: 'chào từ A' } });
   const outcome = JSON.parse(sent.result.content[0].text);
+  assert.equal(hub.mayMessage(b.data.id, a.id), true, 'B trả lời được A');
   assert.equal(outcome.delivered.length, 1);
   assert.equal(outcome.delivered[0].machine, 'MayB');
 

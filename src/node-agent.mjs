@@ -80,7 +80,8 @@ function systemPromptFor(session, machineName, movedFrom = null, remote = null) 
   return [
     `Phiên này được mở từ Orbit Remote (mã phiên ${session.id}, tên "${session.name}", máy ${machineName}).`,
     'Người dùng có thể đang điều khiển phiên từ điện thoại, nên trả lời gọn và rõ.',
-    'Có thể nhắn cho các phiên Claude khác, kể cả phiên ở máy khác, bằng công cụ orbit_remote_send;',
+    'Có thể nhắn cho các phiên Claude khác, kể cả phiên ở máy khác, bằng công cụ orbit_remote_send: phiên cùng nhóm,',
+    'phiên người dùng đã tag (@Tên) trong tin gửi cho phiên này, hay phiên vừa nhắn cho phiên này;',
     'xem các phiên đang có bằng orbit_remote_sessions.',
     'Tin từ phiên khác tới thành một lượt bắt đầu bằng "[Orbit Remote]"; chỉ trả lời khi tin đó cần trả lời.',
     'Phiên được chủ dự án xếp vào một nhóm thì xem mục tiêu, thành viên và bảng việc của nhóm bằng orbit_remote_group.',

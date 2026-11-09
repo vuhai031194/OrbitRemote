@@ -55,7 +55,9 @@ khiển màn hình máy, cho các phiên nhắn tin và làm việc nhóm với 
 **Nhiều phiên làm việc cùng nhau**
 
 - **Các phiên nhắn tin cho nhau**, kể cả khác máy: tin được đẩy thẳng vào phiên nhận thành một lượt mới. Tin chỉ để báo
-  (`needs_action: false`) được giữ lại và gộp vào lượt kế tiếp của người nhận, đỡ tốn token.
+  (`needs_action: false`) được giữ lại và gộp vào lượt kế tiếp của người nhận, đỡ tốn token. Một phiên nhắn được cho
+  phiên cùng nhóm, phiên bạn đã tag (`@Tên`) trong tin gửi cho nó, và phiên vừa nhắn cho nó; nhờ vậy một phiên bị trang
+  web hay tệp độc dắt mũi không sai được mọi phiên khác.
 - **Phiên làm việc trên máy khác**: một phiên chạy ở máy A chạy lệnh, đọc sửa tệp, chụp và bấm màn hình của máy B (máy B phải
   cho phép).
 - **Chuyển phiên sang máy khác**: commit tạm phần sửa dở, đẩy lên, máy đích kéo về, chép nhật ký phiên, chạy tiếp với đủ

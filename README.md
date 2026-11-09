@@ -68,6 +68,8 @@ they run on different machines.
 
 - **Sessions message each other**, across machines too: a message is pushed straight into the receiving session as a new
   turn. Messages that only inform (`needs_action: false`) are held and folded into the receiver's next turn to save tokens.
+  A session can message sessions in its group, sessions you tagged (`@Name`) in a message to it, and sessions that just
+  messaged it, so one session misled by a web page or file cannot drive every other session.
 - **Work on another machine**: a session running on machine A runs commands, reads and edits files, and sees and clicks
   the screen of machine B (machine B must allow it).
 - **Move a session to another machine**: work in progress is committed as a temporary commit and pushed, the target pulls

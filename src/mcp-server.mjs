@@ -83,8 +83,9 @@ const TOOLS = [
     description:
       'Gửi tin nhắn tới một phiên Claude khác do Orbit Remote quản lý, kể cả phiên ở máy khác. ' +
       'Tin được đưa thẳng vào phiên nhận thành một lượt mới, phiên nhận không phải chờ. ' +
-      '"to" là mã phiên, tên phiên, hoặc "tên@máy"; "*" gửi cho mọi phiên đang chạy, ' +
-      '"#group" gửi cho mọi phiên cùng nhóm.',
+      '"to" là mã phiên, tên phiên, hoặc "tên@máy"; "*" gửi cho mọi phiên đang chạy mà phiên này được nhắn, ' +
+      '"#group" gửi cho mọi phiên cùng nhóm. Chỉ nhắn được cho phiên cùng nhóm, phiên mà người dùng đã tag (@Tên) ' +
+      'trong tin gửi cho phiên này, hay phiên vừa nhắn cho phiên này; phiên khác thì nhờ người dùng tag.',
     inputSchema: {
       type: 'object',
       properties: {

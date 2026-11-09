@@ -34,6 +34,7 @@ const DELTA_FLUSH_MS = 60; // gộp từng mẩu chữ đang chảy để không
 const SAVE_DELAY_MS = 1500;
 const SAVE_RETRY_MS = 5000;
 const SEEN_EIDS_MAX = 5000;
+const CONTACTS_MAX = 50; // số phiên một phiên được nhắn cho (ngoài nhóm), giữ những phiên mới cho phép gần nhất
 const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
 
 // So đường dẫn tệp app xin với lời của phiên (readSessionFile): bỏ khác biệt \ và /, hoa thường, và mã %XX của
@@ -121,6 +122,7 @@ export class Hub extends EventEmitter {
     // Phiên ở máy này được làm việc trên máy kia (orbit_machine_*): { mã máy đích: [mã máy nguồn] }, người dùng bật
     // trong bảng của máy đích. lastControl: lần điều khiển gần nhất trên mỗi máy đích, để app báo cho người ngồi máy.
     this.controlGrants = {};
+    this.contacts = {}; // phiên -> [phiên nó được nhắn cho, ngoài nhóm] (mayMessage)
     this.lastControl = new Map();
     this.deltas = new Map();
     this.deltaTimer = null;
@@ -139,6 +141,7 @@ export class Hub extends EventEmitter {
     if (!saved) return;
     this.recents = saved.recents || {};
     this.controlGrants = saved.controlGrants && typeof saved.controlGrants === 'object' ? saved.controlGrants : {};
+    this.contacts = saved.contacts && typeof saved.contacts === 'object' ? saved.contacts : {};
     for (const meta of saved.sessions || []) {
       // Trạm vừa khởi động thì chưa phiên nào còn chạy dưới quyền nó; đầu máy nào còn
       // giữ phiên sống sẽ tự báo lại khi nối vào.
@@ -174,6 +177,8 @@ export class Hub extends EventEmitter {
         recents: this.recents,
         groups: this.groups.toJSON(),
         controlGrants: this.controlGrants,
+        // Chỉ giữ của phiên còn trong danh sách: phiên đã xoá thì quyền nhắn của nó cũng thôi.
+        contacts: Object.fromEntries(Object.entries(this.contacts).filter(([id]) => this.sessions.has(id))),
       }, { backup: true });
       return true;
     } catch (err) {
@@ -536,12 +541,36 @@ export class Hub extends EventEmitter {
 
   // needsAction: người gửi tự khai tin có cần người nhận làm gì không; false thì đầu máy giữ tin lại, gộp vào lượt kế
   // tiếp của người nhận thay vì mở riêng một lượt Claude. Không khai (công cụ bản cũ) thì giao như thường.
+  // ---- Ai được nhắn cho ai ---------------------------------------------------------------------
+  // Tin giữa các phiên chạy như một lượt mới của người nhận, mà phiên mở từ app mặc định bỏ qua quyền: một phiên bị
+  // chèn lệnh (đọc phải trang web hay tệp độc) mà nhắn được cho mọi phiên là sai được mọi phiên làm mọi việc. Nên một
+  // phiên chỉ nhắn được cho: phiên cùng nhóm; phiên chủ dự án đã tag (@Tên) trong tin gửi cho nó; và phiên vừa nhắn
+  // cho nó (để trả lời). Danh sách lưu theo phiên (contacts), qua cả lần trạm khởi động lại.
+  mayMessage(fromId, toId) {
+    const g = this.groups.groupOf(fromId);
+    if (g && g.id === this.groups.groupOf(toId)?.id) return true;
+    return (this.contacts[fromId] || []).includes(toId);
+  }
+
+  allowContact(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    const list = (this.contacts[fromId] || []).filter((x) => x !== toId);
+    list.push(toId);
+    this.contacts[fromId] = list.slice(-CONTACTS_MAX);
+    this.scheduleSave();
+  }
+
   async route(fromId, to, text, needsAction = null) {
     const body = String(text || '').trim();
     if (!body) throw new Error('Tin nhắn trống.');
     const sender = this.sessions.get(fromId)?.snap;
     const from = sender ? { id: sender.id, name: sender.name, machine: sender.machine } : { id: fromId, name: fromId, machine: '?' };
-    const targets = this.resolveTargets(fromId, to);
+    const all = this.resolveTargets(fromId, to);
+    const targets = all.filter((r) => this.mayMessage(fromId, r.snap.id));
+    if (!targets.length) {
+      const names = all.map((r) => `"${r.snap.name}"`).slice(0, 5).join(', ');
+      throw new Error(`Phiên này chưa được nhắn cho ${names || 'phiên đó'}: chỉ nhắn được cho phiên cùng nhóm, phiên mà người dùng đã tag (@Tên) trong tin gửi cho phiên này, hay phiên vừa nhắn cho phiên này. Nhờ người dùng tag phiên đó nếu cần.`);
+    }
     // Nhóm đang tạm dừng: thành viên không nhắn được cho nhau (mỗi tin là một lượt của người nhận).
     const own = this.groups.groupOf(fromId);
     if (own?.status === 'paused' && targets.some((r) => own.members.some((m) => m.id === r.snap.id))) {
@@ -557,6 +586,7 @@ export class Hub extends EventEmitter {
       try {
         const reply = await this.machineRpc(r.snap.machineId).request({ op: 'deliver', id: r.snap.id, from, text: body, ...(g ? { group: { id: g.id, name: g.name } } : {}), ...(hold ? { hold: true } : {}) });
         delivered.push(who);
+        this.allowContact(r.snap.id, fromId); // người nhận trả lời được
         if (hold && reply?.held === true) held.push(who);
       } catch (err) {
         failed.push({ ...who, error: err.message });
@@ -769,6 +799,8 @@ export class Hub extends EventEmitter {
   // phiên có thật rồi gửi kèm tên, máy, trạng thái, thư mục để Claude biết đích danh phiên nào (claude-session.mjs).
   sendToSession(id, text, from, attachments = null, mentions = null) {
     const tagged = this.resolveMentions(mentions, text);
+    // Chủ dự án tag phiên nào trong tin gửi cho phiên này thì phiên này nhắn được cho phiên đó (mayMessage).
+    if (from?.kind === 'user') for (const t of tagged) this.allowContact(id, t.id);
     return this.sessionRpc(id).request({ op: 'send', id, text, from, ...(attachments?.length ? { attachments } : {}), ...(tagged.length ? { mentions: tagged } : {}) });
   }
 
