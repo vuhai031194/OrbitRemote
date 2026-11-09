@@ -1,11 +1,12 @@
-// Danh sách máy và phiên ở màn chính, dạng cây: hai mục lớn Online và Offline; trong mỗi mục là các máy;
-// dưới mỗi máy là các nhóm và các phiên thuộc mục đó. Mục, máy và nhóm thu gọn hay xổ ra được bằng nút mũi
-// tên, nhớ cho lần mở sau (localStorage).
+// Danh sách máy và phiên ở màn chính, dạng cây: hai mục lớn "Đang bật" và "Đang tắt" theo trạng thái MÁY, nên mỗi
+// máy hiện đúng một lần (trước đây chia theo trạng thái phiên: máy đang bật mà có phiên đã dừng hiện ở cả hai mục,
+// trông như hai máy). Dưới mỗi máy: nhóm và phiên đang chạy, phiên đang mở ngoài app (VS Code, terminal), mục
+// "Đã dừng" thu gọn sẵn, và lối sang phiên cũ trên máy (màn của máy). Mục, máy, nhóm thu gọn hay xổ ra được bằng nút
+// mũi tên, nhớ cho lần mở sau (localStorage).
 //
-// Phiên online: đang chạy (đang mở, sẵn sàng, đang làm, cần duyệt) trên máy đang nối. Nhóm online: đang
-// chạy hay tạm dừng, có phiên online, hoặc là nhóm mới chưa có phiên nào (để còn kéo phiên vào). Nhóm nằm
-// dưới máy của trưởng nhóm và chứa mọi phiên của nó (phiên ở máy khác ghi thêm tên máy), nên không phiên
-// nào hiện hai lần. Máy đang bật mà có phiên đã dừng thì có mặt ở cả hai mục.
+// Nhóm đang chạy: đang chạy hay tạm dừng, có phiên đang chạy, hoặc là nhóm mới chưa có phiên nào (để còn kéo phiên
+// vào). Nhóm nằm dưới máy của trưởng nhóm và chứa mọi phiên của nó (phiên ở máy khác ghi thêm tên máy), nên không
+// phiên nào hiện hai lần.
 
 import { h, timeAgo } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
@@ -49,8 +50,9 @@ function setShut(key, shut) {
 
 // Một nút gập được: đầu luôn hiện, thân ẩn khi thu gọn. Bấm mũi tên là đổi tại chỗ, không vẽ lại cả cây;
 // thân co giãn bằng grid-template-rows nên cao bao nhiêu cũng mượt mà không phải đo.
-function fold(key, cls, headParts, body, { attrs = {}, wholeHead = false } = {}) {
-  let shut = Boolean(shutState()[key]);
+function fold(key, cls, headParts, body, { attrs = {}, wholeHead = false, shutByDefault = false } = {}) {
+  const saved = shutState();
+  let shut = key in saved ? Boolean(saved[key]) : shutByDefault;
   const btn = h('button', { class: 'fold-btn', type: 'button', 'aria-expanded': String(!shut), 'aria-label': shut ? 'Xổ ra' : 'Thu gọn' }, icon('down', 16));
   const head = h('div', { class: 'fold-head' }, headParts, btn);
   // fold-inner co giãn (không có padding nên co được về đúng 0), fold-pad mang khoảng đệm của nội dung.
@@ -105,35 +107,34 @@ const byActivity = (a, b) => Number(b.status === 'waiting') - Number(a.status ==
 const byGroup = (a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
   || String(b.createdAt).localeCompare(String(a.createdAt));
 
-function collect() {
-  const make = () => ({ machines: new Map(), loose: [] });
-  const lists = { online: make(), offline: make() };
-  const bucket = (label, machineId) => {
-    const map = lists[label].machines;
-    if (!map.has(machineId)) map.set(machineId, { groups: [], sessions: [] });
-    return map.get(machineId);
+// Mỗi máy (kể cả máy chưa có phiên): nhóm đang chạy và đã dừng, phiên đang chạy và đã dừng (ngoài nhóm). loose: nhóm
+// chưa có phiên nào trên máy nào.
+export function collect() {
+  const machines = new Map();
+  const loose = [];
+  const bucket = (id) => {
+    if (!machines.has(id)) machines.set(id, { groupsOn: [], groupsOff: [], running: [], stopped: [] });
+    return machines.get(id);
   };
   const grouped = new Set();
   for (const g of store.groups.values()) {
     for (const m of g.members) grouped.add(m.id);
-    const label = groupOnline(g) ? 'online' : 'offline';
     const mid = homeMachine(g);
-    if (mid) bucket(label, mid).groups.push(g);
-    else lists[label].loose.push(g);
+    if (!mid) loose.push(g);
+    else (groupOnline(g) ? bucket(mid).groupsOn : bucket(mid).groupsOff).push(g);
   }
   for (const s of store.sessions.values()) {
-    if (!grouped.has(s.id)) bucket(sessionOnline(s) ? 'online' : 'offline', s.machineId).sessions.push(s);
+    if (!grouped.has(s.id)) (RUNNING.has(s.status) ? bucket(s.machineId).running : bucket(s.machineId).stopped).push(s);
   }
-  // Mục Online có mọi máy đang nối (kể cả chưa có phiên); mục Offline có mọi máy đang tắt.
-  for (const m of store.machines.values()) bucket(m.online ? 'online' : 'offline', m.id);
-  return lists;
+  for (const m of store.machines.values()) bucket(m.id);
+  return { machines, loose };
 }
 
 // Máy trạm chưa biết (phiên của máy đã bị quên): dựng tạm từ tên máy ghi trong phiên.
 function machineOf(id, items) {
   const m = store.machines.get(id);
   if (m) return m;
-  const s = items.sessions[0] || items.groups.map((g) => store.sessions.get(g.leaderId)).find(Boolean);
+  const s = items.running[0] || items.stopped[0] || [...items.groupsOn, ...items.groupsOff].map((g) => store.sessions.get(g.leaderId)).find(Boolean);
   return { id, name: s?.machine || 'Máy không rõ', online: false, lastSeen: '', external: [], unknown: true };
 }
 
@@ -167,15 +168,24 @@ function lastSeenText(iso) {
   return /\d+\/\d+/.test(ago) ? `thấy lần cuối ${ago}` : `thấy ${ago} trước`;
 }
 
-function machineBlock(label, m, items) {
-  const cards = [...items.sessions].sort(byActivity);
-  const members = items.groups.flatMap(groupMembers);
-  const count = cards.length + members.length;
-  const waiting = [...cards, ...members].filter((s) => s.status === 'waiting').length;
-  const outside = m.external?.length || 0;
-  const info = label === 'online'
-    ? [count ? `${count} phiên` : 'chưa có phiên', outside ? `${outside} ngoài app` : ''].filter(Boolean).join(' · ')
-    : m.online ? `đang bật · ${count} phiên đã dừng` : ['đang tắt', lastSeenText(m.lastSeen)].filter(Boolean).join(' · ');
+// Phiên đang mở ngoài app (VS Code, terminal) trên máy: một dòng bấm được, mở màn xem phiên đó (chỉ đọc, từ đó tiếp
+// tục hay tách nhánh ở app). Trước đây màn chính chỉ hiện con số "n ngoài app".
+function externalLine(machineId, t) {
+  return h('a', { class: 'tree-ext', href: `#/x/${machineId}/${t.claudeSessionId}` },
+    h('span', { class: 'status-dot' }),
+    h('span', { class: 'tree-ext-name' }, t.title || '(chưa có câu hỏi)'),
+    h('span', { class: 'tree-ext-meta' }, 'ngoài app'));
+}
+
+function machineBlock(m, items) {
+  const running = [...items.running].sort(byActivity);
+  const live = [...running, ...items.groupsOn.flatMap(groupMembers)];
+  const stoppedCount = items.stopped.length + items.groupsOff.reduce((n, g) => n + groupMembers(g).length, 0);
+  const waiting = live.filter((s) => s.status === 'waiting').length;
+  const outside = m.online ? m.external || [] : [];
+  const info = m.online
+    ? [live.length ? `${live.length} đang chạy` : 'chưa có phiên chạy', outside.length ? `${outside.length} ngoài app` : '', stoppedCount ? `${stoppedCount} đã dừng` : ''].filter(Boolean).join(' · ')
+    : ['đang tắt', lastSeenText(m.lastSeen), stoppedCount + live.length ? `${stoppedCount + live.length} phiên` : ''].filter(Boolean).join(' · ');
   const head = h(m.unknown ? 'span' : 'a', { class: `machine-label tree-machine${!m.unknown && isOpenMachine(m.id) ? ' current' : ''}`, ...(m.unknown ? {} : { href: `#/m/${m.id}` }) },
     h('span', { class: `mini-dot ${m.online ? 'on' : 'off'}` }),
     icon('machine', 15),
@@ -183,29 +193,38 @@ function machineBlock(label, m, items) {
     waiting ? h('span', { class: 'machine-label-alert' }, icon('shield', 12), `${waiting} cần duyệt`) : null,
     h('span', { class: 'machine-label-count' }, info));
   const body = [];
-  for (const g of [...items.groups].sort(byGroup)) body.push(groupBlock(g, m.id));
-  if (cards.length) body.push(h('div', { class: 'cards' }, cards.map((s) => sessionCard(s, { showMachine: false }))));
-  if (!body.length) {
-    body.push(label === 'online'
-      ? h('div', { class: 'tree-empty' }, 'Chưa có phiên đang chạy.',
-        h('button', { class: 'tree-empty-action', type: 'button', onclick: () => openNewSession({ machineId: m.id }) }, icon('plus', 13), 'Mở phiên'))
-      : h('div', { class: 'tree-empty' }, 'Không còn phiên nào.'));
+  for (const g of [...items.groupsOn].sort(byGroup)) body.push(groupBlock(g, m.id));
+  if (running.length) body.push(h('div', { class: 'cards' }, running.map((s) => sessionCard(s, { showMachine: false }))));
+  if (outside.length) body.push(h('div', { class: 'tree-ext-list' }, outside.map((t) => externalLine(m.id, t))));
+  if (m.online && !live.length) {
+    body.push(h('div', { class: 'tree-empty' }, 'Chưa có phiên đang chạy.',
+      h('button', { class: 'tree-empty-action', type: 'button', onclick: () => openNewSession({ machineId: m.id }) }, icon('plus', 13), 'Mở phiên')));
   }
-  return fold(`m:${label}:${m.id}`, `tree-machine-block${m.online ? '' : ' offline'}${waiting ? ' attention' : ''}`, head, body);
+  if (stoppedCount) {
+    const stoppedBody = [
+      ...[...items.groupsOff].sort(byGroup).map((g) => groupBlock(g, m.id)),
+      items.stopped.length ? h('div', { class: 'cards' }, [...items.stopped].sort(byActivity).map((s) => sessionCard(s, { showMachine: false }))) : null,
+    ];
+    body.push(fold(`stopped:${m.id}`, 'tree-stopped', [h('span', { class: 'tree-stopped-title' }, 'Đã dừng'), h('span', { class: 'group-count' }, String(stoppedCount))],
+      stoppedBody, { wholeHead: true, shutByDefault: true }));
+  }
+  if (m.online && !m.unknown) body.push(h('a', { class: 'tree-more', href: `#/m/${m.id}` }, 'Xem phiên cũ trên máy', icon('chevron', 13)));
+  if (!body.length) body.push(h('div', { class: 'tree-empty' }, 'Không có phiên nào.'));
+  return fold(`m:${m.id}`, `tree-machine-block${m.online ? '' : ' offline'}${waiting ? ' attention' : ''}`, head, body);
 }
 
-function labelBlock(label, data) {
-  const online = label === 'online';
-  const entries = [...data.machines.entries()].map(([id, items]) => ({ m: machineOf(id, items), items }));
+// Một mục lớn: các máy đang bật (online) hay đang tắt.
+function labelBlock(online, entries, loose) {
   entries.sort(online
     ? (a, b) => Number(Boolean(b.m.local)) - Number(Boolean(a.m.local)) || a.m.name.localeCompare(b.m.name)
-    : (a, b) => Number(b.m.online) - Number(a.m.online) || String(b.m.lastSeen || '').localeCompare(String(a.m.lastSeen || '')));
-  const sessions = entries.reduce((n, e) => n + e.items.sessions.length + e.items.groups.reduce((k, g) => k + groupMembers(g).length, 0), 0);
-  const waiting = online && entries.some((e) => e.items.sessions.some((s) => s.status === 'waiting') || e.items.groups.some((g) => groupMembers(g).some((s) => s.status === 'waiting')));
+    : (a, b) => String(b.m.lastSeen || '').localeCompare(String(a.m.lastSeen || '')));
+  const liveOf = (items) => items.running.length + items.groupsOn.reduce((k, g) => k + groupMembers(g).length, 0);
+  const sessions = entries.reduce((n, e) => n + liveOf(e.items), 0);
+  const waiting = online && entries.some((e) => e.items.running.some((s) => s.status === 'waiting') || e.items.groupsOn.some((g) => groupMembers(g).some((s) => s.status === 'waiting')));
   const head = [
     h('span', { class: `tree-label-dot ${online ? 'on' : 'off'}` }),
-    h('span', { class: 'tree-label-title' }, online ? 'Online' : 'Offline'),
-    h('span', { class: 'group-count' }, `${entries.length} máy · ${sessions} phiên`),
+    h('span', { class: 'tree-label-title' }, online ? 'Đang bật' : 'Đang tắt'),
+    h('span', { class: 'group-count' }, online ? `${entries.length} máy · ${sessions} phiên chạy` : `${entries.length} máy`),
     waiting ? h('span', { class: 'machine-label-alert' }, icon('shield', 12), 'cần duyệt') : null,
     h('span', { class: 'fold-spacer' }),
     online ? h('button', { class: 'title-action', type: 'button', onclick: () => openNewGroup() }, icon('plus', 14), 'Tạo nhóm') : null,
@@ -215,15 +234,17 @@ function labelBlock(label, data) {
     body.push(h('button', { class: 'team-empty', type: 'button', onclick: () => openNewGroup() }, icon('group', 20),
       h('span', null, 'Gom nhiều phiên vào một nhóm, gán vai trò cho từng phiên, đặt mục tiêu chung rồi bấm Bắt đầu.')));
   }
-  for (const g of [...data.loose].sort(byGroup)) body.push(groupBlock(g, ''));
-  for (const { m, items } of entries) body.push(machineBlock(label, m, items));
-  if (!entries.length && !data.loose.length) {
-    body.push(h('div', { class: 'tree-empty' }, online ? 'Chưa có máy nào đang nối.' : 'Không có máy nào đang tắt, cũng không có phiên nào đã dừng.'));
-  }
-  return fold(`label:${label}`, `tree-label tree-${label}${waiting ? ' attention' : ''}`, head, body, { wholeHead: true });
+  for (const g of [...loose].sort(byGroup)) body.push(groupBlock(g, ''));
+  for (const { m, items } of entries) body.push(machineBlock(m, items));
+  if (!entries.length && !loose.length) body.push(h('div', { class: 'tree-empty' }, 'Chưa có máy nào đang nối.'));
+  return fold(`label:${online ? 'online' : 'offline'}`, `tree-label tree-${online ? 'online' : 'offline'}${waiting ? ' attention' : ''}`, head, body, { wholeHead: true });
 }
 
 export function homeTree() {
-  const lists = collect();
-  return h('div', { class: 'tree' }, labelBlock('online', lists.online), labelBlock('offline', lists.offline));
+  const { machines, loose } = collect();
+  const entries = [...machines.entries()].map(([id, items]) => ({ m: machineOf(id, items), items }));
+  const on = entries.filter((e) => e.m.online);
+  const off = entries.filter((e) => !e.m.online);
+  // Không có máy nào đang tắt thì khỏi hiện mục đó.
+  return h('div', { class: 'tree' }, labelBlock(true, on, loose), off.length ? labelBlock(false, off, []) : null);
 }

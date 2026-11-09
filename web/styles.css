@@ -2780,3 +2780,15 @@ html.float-moving, html.float-moving * { cursor: var(--float-cursor, grabbing) !
 
 /* Nút cho chương trình SYSTEM bấm màn khoá, hộp thoại UAC trong ít phút (screen.js grantBtn). */
 .screen-stage .secure-grant { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 30; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35); }
+
+/* Màn chính (tree.js): phiên đang mở ngoài app thành dòng bấm được, mục "Đã dừng" thu gọn sẵn, lối sang phiên cũ. */
+.tree-ext-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; }
+.tree-ext { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: 10px; color: var(--text); font-size: 0.88em; }
+.tree-ext:hover { background: var(--bg-input); }
+.tree-ext .status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--st-busy); }
+.tree-ext-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree-ext-meta { flex: none; color: var(--text-dim); font-size: 0.86em; }
+.tree-stopped { margin-top: 6px; }
+.tree-stopped-title { font-size: 0.86em; font-weight: 600; color: var(--text-dim); }
+.tree-more { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; margin-top: 4px; padding: 4px 2px; font-size: 0.84em; color: var(--text-dim); }
+.tree-more:hover { color: var(--text); }

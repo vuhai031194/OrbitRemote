@@ -305,3 +305,36 @@ test('luồng sự kiện bị đóng hẳn (cổng app trả 502 khi trạm t�
     reply = null;
   }
 });
+
+test('màn chính: mỗi máy hiện đúng một lần (máy đang bật có phiên đã dừng không còn hiện thêm ở mục "đang tắt"); phiên ngoài app thành dòng bấm được; "Đã dừng" thu gọn sẵn', async () => {
+  const { homeTree } = await import('../web/views/tree.js');
+  const saved = { machines: new Map(store.machines), sessions: new Map(store.sessions), groups: new Map(store.groups) };
+  try {
+    store.machines = new Map([
+      ['mOn', { id: 'mOn', name: 'Máy Bật', online: true, external: [{ claudeSessionId: csid(7), title: 'Đang sửa ở VS Code', active: true }] }],
+      ['mOff', { id: 'mOff', name: 'Máy Tắt', online: false, lastSeen: '2026-11-09T10:00:00Z', external: [] }],
+    ]);
+    store.sessions = new Map([
+      ['r1', { id: 'r1', machineId: 'mOn', name: 'Đang chạy', status: 'idle', lastActivity: '2026-11-09T10:00:00Z' }],
+      ['d1', { id: 'd1', machineId: 'mOn', name: 'Đã xong', status: 'stopped', lastActivity: '2026-11-09T09:00:00Z' }],
+      ['d2', { id: 'd2', machineId: 'mOff', name: 'Cũ', status: 'stopped', lastActivity: '2026-11-08T09:00:00Z' }],
+    ]);
+    store.groups = new Map();
+    const tree = homeTree();
+    const names = tree.all('machine-label-name').map((e) => e.text());
+    assert.deepEqual(names.sort(), ['Máy Bật', 'Máy Tắt'], 'mỗi máy một lần');
+    const ext = tree.all('tree-ext');
+    assert.equal(ext.length, 1);
+    assert.equal(ext[0].attrs?.href || ext[0].href, `#/x/mOn/${csid(7)}`);
+    const stopped = tree.all('tree-stopped');
+    assert.equal(stopped.length, 2, 'mỗi máy có phiên đã dừng một mục "Đã dừng"');
+    assert.ok(stopped.every((f) => f.classList.contains('shut')), 'thu gọn sẵn');
+    assert.ok(tree.all('tree-more').length === 1, 'lối sang phiên cũ chỉ ở máy đang bật');
+    store.machines.get('mOff').online = true;
+    assert.equal(homeTree().all('tree-label').length, 1, 'không máy nào tắt thì không hiện mục "Đang tắt"');
+  } finally {
+    store.machines = saved.machines;
+    store.sessions = saved.sessions;
+    store.groups = saved.groups;
+  }
+});
