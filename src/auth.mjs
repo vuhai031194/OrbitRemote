@@ -13,7 +13,8 @@ import { STATE_DIR, readStateJson, writeJsonAtomic } from './paths.mjs';
 
 const AUTH_FILE = join(STATE_DIR, 'auth.json');
 const PAIR_TTL_MS = 10 * 60 * 1000;
-const PAIR_MAX_FAILS = 5; // đoán sai bấy nhiêu lần liền thì mọi mã chết, phải xin mã mới
+const PAIR_MAX_FAILS = 5; // đoán sai bấy nhiêu lần thì nơi gửi bị chặn PAIR_LOCK_MS (redeem)
+const PAIR_LOCK_MS = 10 * 60 * 1000;
 const PAIR_MAX_ACTIVE = 3;
 const ENROLL_TTL_MS = 30 * 60 * 1000; // yêu cầu nối chưa ai duyệt thì tự hết hạn
 const ENROLL_PICKUP_MS = 10 * 60 * 1000; // đã duyệt mà máy không tới lấy thẻ thì huỷ
@@ -32,7 +33,7 @@ export class Auth {
     this.data = value && Array.isArray(value.devices) ? value : { devices: [] };
     this.byHash = new Map(this.data.devices.map((d) => [d.tokenHash, d]));
     this.pairCodes = new Map(); // mã -> thời điểm hết hạn
-    this.pairFails = 0;
+    this.pairFailsByIp = new Map(); // nơi gửi -> { count, until }: đoán sai mã ghép đôi
     this.lastSeenDirty = false;
     // Yêu cầu nối của máy mới: chỉ trong bộ nhớ, trạm khởi động lại thì máy tự gửi lại.
     this.enrollments = new Map();
@@ -77,23 +78,28 @@ export class Auth {
     return code;
   }
 
-  // Đổi mã ghép đôi lấy một thẻ dài hạn. Mã dùng một lần: ghép xong là mã chết. Đoán sai
-  // PAIR_MAX_FAILS lần liền thì mọi mã đang sống đều chết, phải xin mã mới.
-  redeem(code, name, kind = 'device') {
+  // Đổi mã ghép đôi lấy một thẻ dài hạn. Mã dùng một lần: ghép xong là mã chết.
+  // ip: nơi gửi yêu cầu. Đoán sai PAIR_MAX_FAILS lần thì chỉ nơi đó bị chặn PAIR_LOCK_MS (trước đây là xoá mọi mã
+  // đang sống: bất kỳ ai trên cùng mạng gõ sai năm lần là chặn được việc ghép của chủ máy, mãi mãi).
+  // extra: trường gắn thêm vào thẻ (thẻ của máy chạy phiên mang machineId của máy đó).
+  redeem(code, name, kind = 'device', { ip = '', extra = {} } = {}) {
     this.prunePairCodes();
+    const now = Date.now();
+    const key = String(ip || '?');
+    let fails = this.pairFailsByIp.get(key);
+    if (fails?.until && fails.until <= now) fails = null; // hết hạn chặn: đếm lại từ đầu
+    if (fails?.until) return { error: 'Sai mã quá nhiều lần. Thử lại sau ít phút.' };
     if (!this.pairCodes.size) return { error: 'Mã ghép đôi đã hết hạn. Lấy mã mới trên máy tính.' };
     const given = String(code || '').replace(/\D/g, '');
     if (!this.pairCodes.has(given)) {
-      this.pairFails += 1;
-      if (this.pairFails >= PAIR_MAX_FAILS) {
-        this.pairCodes.clear();
-        this.pairFails = 0;
-      }
+      const count = (fails?.count || 0) + 1;
+      this.pairFailsByIp.set(key, { count, until: count >= PAIR_MAX_FAILS ? now + PAIR_LOCK_MS : 0 });
+      if (this.pairFailsByIp.size > 1000) this.pairFailsByIp.delete(this.pairFailsByIp.keys().next().value);
       return { error: 'Sai mã ghép đôi.' };
     }
     this.pairCodes.delete(given);
-    this.pairFails = 0;
-    const { token, device } = this.issue(name, kind);
+    this.pairFailsByIp.delete(key);
+    const { token, device } = this.issue(name, kind, extra);
     return { token, device: publicDevice(device) };
   }
 

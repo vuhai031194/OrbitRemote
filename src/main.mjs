@@ -532,7 +532,7 @@ async function runJoin(hubUrl, code) {
     const res = await fetch(new URL('/api/pair', hubUrl), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, name: MACHINE_NAME, kind: 'node' }),
+      body: JSON.stringify({ code, name: MACHINE_NAME, kind: 'node', machineId: machineIdentity().id }), // thẻ gắn với máy này
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || `Trạm trả mã ${res.status}.`);

@@ -1113,6 +1113,7 @@ export class Hub extends EventEmitter {
     this.machines.delete(machineId);
     for (const [id, r] of this.sessions) {
       if (r.snap.machineId !== machineId) continue;
+      this.groups.dropSession(id); // như forget(): không để nhóm còn thành viên hay trưởng nhóm đã mất
       this.sessions.delete(id);
       this.push('session_removed', { id });
     }

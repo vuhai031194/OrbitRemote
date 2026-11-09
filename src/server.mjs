@@ -628,7 +628,17 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
     if (req.method === 'POST' && path === '/api/pair') {
       const body = await readBody(req);
       const kind = body.kind === 'node' ? 'node' : 'device';
-      const result = auth.redeem(body.code, body.name, kind);
+      // Thẻ của máy chạy phiên phải gắn với đúng một mã máy, như thẻ cấp qua duyệt nối: thẻ không gắn mã thì máy cầm
+      // nó khai mã nào cũng được, kể cả mã của máy giữ trạm. Mã của máy đang nối thì không cấp (giống /api/enroll).
+      let extra = {};
+      if (kind === 'node') {
+        const machineId = String(body.machineId || '');
+        if (!/^[\w-]{4,40}$/.test(machineId)) throw new HttpError(400, 'Thiếu mã máy. Cập nhật Orbit Remote trên máy này rồi chạy lại lệnh join.');
+        const claimed = hub.machines.get(machineId);
+        if (claimed?.local || claimed?.online) throw new HttpError(409, 'Mã máy này đang được một máy đã nối dùng.');
+        extra = { machineId };
+      }
+      const result = auth.redeem(body.code, body.name, kind, { ip: req.socket.remoteAddress, extra });
       if (result.error) throw new HttpError(403, result.error);
       const secure = req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
       const headers = kind === 'device'
@@ -659,7 +669,13 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
     }
 
     if (req.method !== 'GET') throw new HttpError(405, 'Không hỗ trợ.');
-    if (path.startsWith('/custom/')) return serveStatic(res, CUSTOM_DIR, decodeURIComponent(path.slice('/custom/'.length)));
+    if (path.startsWith('/custom/')) {
+      const name = decodeURIComponent(path.slice('/custom/'.length));
+      // theme.css: trang ghép đôi (chưa có thẻ) cũng cần. Phần còn lại (nút tuỳ biến, bảng token, địa chỉ trạm) chỉ
+      // cho thiết bị đã ghép: ai trên cùng mạng cũng đọc được thì lộ cách bạn dùng và địa chỉ Tailscale của trạm.
+      if (name !== 'theme.css' && !auth.check(tokenOf(req), 'device')) throw new HttpError(401, 'Thiết bị chưa ghép đôi.');
+      return serveStatic(res, CUSTOM_DIR, name);
+    }
 
     // Quét QR: điện thoại mở /?pair=<mã>. Trang trỏ manifest tới một bản có địa chỉ khởi động
     // mang sẵn mã, để app thêm vào màn hình chính mở lần đầu là tự ghép, không phải gõ gì.

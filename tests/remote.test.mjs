@@ -1019,7 +1019,7 @@ test('dò tìm: trạm trả lời gói UDP hỏi, và nhận ra trạm qua đ�
   assert.deepEqual(hubs[0].urls, [`http://127.0.0.1:${port}`]);
 });
 
-test('mã ghép đôi: hai mã cùng sống, mỗi mã dùng một lần, đoán sai năm lần liền thì mọi mã chết', () => {
+test('mã ghép đôi: hai mã cùng sống, mỗi mã dùng một lần; đoán sai năm lần thì chỉ nơi đoán bị chặn, chủ máy vẫn ghép được', () => {
   const a = new Auth(join(ROOT, 'auth-codes.json'));
   const forBrowser = a.newPairCode();
   const forPhone = a.newPairCode();
@@ -1029,8 +1029,35 @@ test('mã ghép đôi: hai mã cùng sống, mỗi mã dùng một lần, đoán
   assert.ok(a.redeem(forPhone, 'Lần hai').error, 'mã chỉ dùng một lần');
   const live = a.newPairCode();
   const wrong = live === '000000' ? '111111' : '000000';
-  for (let i = 0; i < 5; i += 1) a.redeem(wrong, 'Đoán');
-  assert.ok(a.redeem(live, 'Muộn').error, 'sai năm lần liền thì mã đang sống cũng chết');
+  for (let i = 0; i < 4; i += 1) assert.equal(a.redeem(wrong, 'Đoán', 'device', { ip: '10.0.0.66' }).error, 'Sai mã ghép đôi.');
+  assert.equal(a.redeem(wrong, 'Đoán', 'device', { ip: '10.0.0.66' }).error, 'Sai mã ghép đôi.');
+  assert.match(a.redeem(live, 'Kẻ đoán', 'device', { ip: '10.0.0.66' }).error, /quá nhiều lần/, 'nơi đoán sai năm lần bị chặn, kể cả khi đoán trúng');
+  assert.ok(a.redeem(live, 'Chủ máy', 'device', { ip: '100.64.0.9' }).token, 'nơi khác (điện thoại của chủ máy) vẫn ghép được');
+});
+
+test('thẻ máy cấp bằng mã ghép đôi gắn với đúng một mã máy; mã của máy đang nối thì không cấp', async () => {
+  const code = auth.newPairCode();
+  const noId = await call('/api/pair', { code, name: 'Máy cũ', kind: 'node' });
+  assert.equal(noId.status, 400, 'thiếu mã máy (bản cũ): nói rõ phải cập nhật');
+  hub.machines.set('mOn001', { id: 'mOn001', name: 'Dang-Noi', online: true, external: [] });
+  try {
+    const taken = await call('/api/pair', { code, name: 'Giả', kind: 'node', machineId: 'mOn001' });
+    assert.equal(taken.status, 409);
+  } finally {
+    hub.machines.delete('mOn001');
+  }
+  const ok = await call('/api/pair', { code, name: 'Máy C', kind: 'node', machineId: 'mC0001' });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  assert.equal(auth.check(ok.data.token, 'node').machineId, 'mC0001', 'thẻ gắn với mã máy: máy cầm nó không khai được mã khác');
+});
+
+test('/custom: chỉ theme.css mở cho trang chưa ghép đôi; nút tuỳ biến, bảng token, địa chỉ trạm phải có thẻ', async () => {
+  const anon = (p) => fetch(`http://127.0.0.1:${port}${p}`);
+  assert.notEqual((await anon('/custom/theme.css')).status, 401);
+  for (const p of ['/custom/actions.json', '/custom/tokens.md', '/custom/hub.json', '/custom/extension.js']) {
+    assert.equal((await anon(p)).status, 401, p);
+  }
+  assert.notEqual((await call('/custom/actions.json')).status, 401, 'thiết bị đã ghép đọc được');
 });
 
 test('mã QR: ma trận của địa chỉ mẫu khớp bản đã được bộ giải mã độc lập (zxing-cpp) xác nhận', async () => {
