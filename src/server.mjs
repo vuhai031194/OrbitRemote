@@ -176,11 +176,16 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
   const nodeLinks = new Map(); // linkId -> { receive, disconnect }
 
   // version, web: cả luồng sự kiện cũng mang, để trang đang mở biết trạm đã chạy bản giao diện khác mà báo tải lại.
-  const fullState = () => ({ ...hub.state(), enrollments: auth.pendingEnrollments(), hub: hubInfo(), version, web: WEB_BUILD });
+  const fullState = () => ({ ...hub.state(), enrollments: enrollments(), hub: hubInfo(), version, web: WEB_BUILD });
   // Nguồn trang app được phép gọi thêm: cổng màn hình của các máy (điện thoại nối thẳng tới máy bằng
   // WebSocket khi xem màn hình).
   const pageConnect = () => hub.screenSources().filter(Boolean).join(' ');
-  const pushEnrollments = () => hub.push('enrollments', auth.pendingEnrollments());
+  // Yêu cầu nối đang chờ, kèm tên máy đã biết nếu bên xin dùng mã của một máy cũ (thẻ trên app nói rõ đó là máy nào).
+  const enrollments = () => auth.pendingEnrollments().map((e) => {
+    const known = hub.machines.get(e.machineId);
+    return known ? { ...e, knownAs: known.alias || known.name } : e;
+  });
+  const pushEnrollments = () => hub.push('enrollments', enrollments());
 
   hub.on('push', (type, data) => {
     if (!appClients.size) return;
@@ -577,6 +582,10 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
     // Máy mới xin nối: không cần thẻ, nhưng chỉ được cấp thẻ khi người dùng bấm duyệt trên app.
     if (req.method === 'POST' && path === '/api/enroll') {
       const body = await readBody(req);
+      // Mã của máy giữ trạm, hay của một máy đang nối: máy thật chỉ xin nối lại khi đã mất thẻ (nên không thể đang
+      // nối), còn đầu máy của máy giữ trạm chạy chung tiến trình với trạm. Cho nối là trao danh tính máy đó cho bên lạ.
+      const claimed = hub.machines.get(String(body.machineId || ''));
+      if (claimed?.local || claimed?.online) throw new HttpError(409, 'Mã máy này đang được một máy đã nối dùng.');
       const result = auth.requestEnroll({ ...body, ip: req.socket.remoteAddress });
       if (result.error) throw new HttpError(429, result.error);
       pushEnrollments();

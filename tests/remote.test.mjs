@@ -370,6 +370,8 @@ test('hai máy: phiên ở máy A nhắn cho phiên ở máy B qua vỏ MCP th�
   assert.equal(hub.machines.has('mB0001'), false, 'chưa duyệt thì máy chưa được nối');
   const state = await call('/api/state');
   assert.ok(state.data.enrollments.some((e) => e.requestId === pending.requestId), 'app thấy yêu cầu nối');
+  assert.match(pending.code, /^\d{4}$/, 'yêu cầu nối có mã xác nhận');
+  assert.equal(state.data.enrollments.find((e) => e.requestId === pending.requestId).code, pending.code, 'thẻ trên app hiện đúng mã máy kia in ra');
   assert.equal((await call(`/api/enroll/${pending.requestId}/approve`, {})).status, 200);
   await waitFor(() => hub.machines.get('mB0001')?.online, 'máy B nối vào trạm qua mạng sau khi duyệt', 12000);
   const saved = readJson(NODE_STATE, {});
@@ -423,6 +425,26 @@ test('hai máy: phiên ở máy A nhắn cho phiên ở máy B qua vỏ MCP th�
   mcp.stdin.end();
   await call(`/api/sessions/${b.data.id}/close`, {});
   await waitFor(() => hub.sessions.get(b.data.id).snap.status === 'stopped', 'phiên B dừng');
+});
+
+test('xin nối bằng mã của máy đang nối thì bị từ chối; bằng mã của máy cũ đang tắt thì thẻ nói rõ đó là máy nào', async () => {
+  for (const machineId of ['mA', 'mB0001']) {
+    const r = await call('/api/enroll', { machineId, name: 'Giả danh', platform: 'win32' });
+    assert.equal(r.status, 409, `${machineId}: ${JSON.stringify(r.data)}`);
+  }
+  assert.ok(!auth.pendingEnrollments().some((e) => e.name === 'Giả danh'), 'không có yêu cầu nào để lỡ tay duyệt');
+
+  hub.machines.set('mOld01', { id: 'mOld01', name: 'May-Cu', alias: 'Máy cũ', online: false, external: [] });
+  try {
+    const r = await call('/api/enroll', { machineId: 'mOld01', name: 'May-Cu', platform: 'win32' });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    const card = (await call('/api/state')).data.enrollments.find((e) => e.requestId === r.data.requestId);
+    assert.equal(card.knownAs, 'Máy cũ');
+    assert.equal(card.code, r.data.code);
+    assert.equal((await call(`/api/enroll/${r.data.requestId}/reject`, {})).status, 200);
+  } finally {
+    hub.machines.delete('mOld01');
+  }
 });
 
 test('phiên ở máy A làm việc trên máy B (orbit_machine_*): cần máy B cho phép; lệnh, tệp, màn hình, Unity đi trọn đường thật', async () => {

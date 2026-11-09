@@ -130,9 +130,12 @@ export class Auth {
       updatedAt: now,
       status: 'pending',
       token: null,
+      // Mã xác nhận: máy xin nối in ra màn của nó, thẻ trên app hiện cùng mã. Tên và địa chỉ IP trên thẻ do bên xin
+      // tự khai nên giả được; mã này thì chỉ đúng máy đã gửi yêu cầu mới biết.
+      code: String(randomInt(0, 10000)).padStart(4, '0'),
     };
     this.enrollments.set(entry.requestId, entry);
-    return { requestId: entry.requestId, pollSecret: entry.pollSecret };
+    return { requestId: entry.requestId, pollSecret: entry.pollSecret, code: entry.code };
   }
 
   pollEnroll(requestId, secret) {
@@ -171,7 +174,7 @@ export class Auth {
     this.pruneEnrollments();
     return [...this.enrollments.values()]
       .filter((e) => e.status === 'pending')
-      .map(({ requestId, machineId, name, platform, ip, at }) => ({ requestId, machineId, name, platform, ip, at }));
+      .map(({ requestId, machineId, name, platform, ip, at, code }) => ({ requestId, machineId, name, platform, ip, at, code }));
   }
 
   revokeMachine(machineId, persist = true) {

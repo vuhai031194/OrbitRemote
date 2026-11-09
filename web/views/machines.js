@@ -69,7 +69,11 @@ export function enrollmentCards() {
         h('div', null,
           h('div', { class: 'enroll-title' }, 'Máy mới xin nối: ', h('b', null, e.name)),
           h('div', { class: 'enroll-sub' }, [PLATFORM[e.platform] || e.platform, e.ip?.replace(/^::ffff:/, ''), timeAgo(e.at)].filter(Boolean).join(' · ')))),
-      h('div', { class: 'field-hint' }, 'Chỉ cho nối nếu đây đúng là máy của bạn. Máy được nối sẽ mở và điều khiển được phiên Claude từ app.'),
+      e.code ? h('div', { class: 'enroll-code' }, 'Mã xác nhận ', h('b', null, e.code)) : null,
+      e.knownAs ? h('div', { class: 'field-hint warn' }, `Máy này xin nối lại bằng mã của máy đã có: ${e.knownAs}. Chỉ cho nối nếu đúng ${e.knownAs} vừa mất kết nối (cài lại, xoá trạng thái).`) : null,
+      h('div', { class: 'field-hint' }, e.code
+        ? 'Chỉ cho nối nếu đây đúng là máy của bạn và mã trên máy đó (cửa sổ setup hay node.log) trùng mã này. Máy được nối sẽ mở và điều khiển được phiên Claude từ app.'
+        : 'Chỉ cho nối nếu đây đúng là máy của bạn. Máy được nối sẽ mở và điều khiển được phiên Claude từ app.'),
       actions);
   }));
 }

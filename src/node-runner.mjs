@@ -47,7 +47,9 @@ async function enroll(hub, machine, { log, signal }) {
     }
   }
   if (!request) return { token: null, reason: 'unreachable' };
-  log(`Đã xin nối vào trạm ${hub.hubName}. Mở Orbit Remote trên điện thoại và bấm "Cho nối".`);
+  log(request.code
+    ? `Đã xin nối vào trạm ${hub.hubName}. Mã xác nhận: ${request.code}. Mở Orbit Remote trên điện thoại, chỉ bấm "Cho nối" khi thẻ hiện đúng mã này.`
+    : `Đã xin nối vào trạm ${hub.hubName}. Mở Orbit Remote trên điện thoại và bấm "Cho nối".`);
   while (!signal?.aborted) {
     await sleep(ENROLL_POLL_MS, signal);
     let poll;

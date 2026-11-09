@@ -305,7 +305,10 @@ export class Hub extends EventEmitter {
         this.groups.onSessionSnap(prev, r.snap);
       }
     }
-    for (const snap of sessions || []) this.upsertSession(machine, snap);
+    for (const snap of sessions || []) {
+      if (this.ownsSession(machine, snap?.id)) this.upsertSession(machine, snap);
+      else this.refuseForeign(machine, 'hello', snap?.id);
+    }
     this.push('machine', this.publicMachine(machine));
     this.scheduleSave();
     return machine;
@@ -320,17 +323,37 @@ export class Hub extends EventEmitter {
     return false;
   }
 
+  // Một máy chỉ được nói về phiên của chính nó. Phiên trạm chưa biết là của máy vừa báo nó (phiên mới mở trên máy
+  // đó); phiên đã có thì chủ là snap.machineId (chuyển phiên sang máy khác thì trạm đổi chủ trước rồi mới bảo máy
+  // đích mở, xem session-move.mjs). Thiếu kiểm này thì một máy (nối nhầm, hay lộ thẻ) giành được mọi phiên của mọi
+  // máy: báo trạng thái là phiên chuyển sang nó, tin của người dùng đi theo.
+  ownsSession(machine, id) {
+    const r = this.sessions.get(String(id || ''));
+    return !r || r.snap.machineId === machine.id;
+  }
+
+  refuseForeign(machine, op, id) {
+    const key = `${op}:${id}`;
+    const said = (machine.refused ||= new Set());
+    if (said.has(key)) return;
+    said.add(key);
+    console.error(`[trạm] máy ${machine.alias || machine.name} (${machine.id}) báo "${op}" cho phiên ${id} không thuộc nó: bỏ qua.`);
+  }
+
   onMachineMessage(machine, message, link) {
     switch (message.op) {
       case 'status':
+        if (!this.ownsSession(machine, message.session?.id)) return this.refuseForeign(machine, 'status', message.session?.id);
         this.upsertSession(machine, message.session);
         return;
       case 'event':
+        if (!this.ownsSession(machine, message.id)) return this.refuseForeign(machine, 'event', message.id);
         // Máy gửi bù sau khi mất nối (node-agent.mjs keepForLater): lô có thể đã tới mà mất câu trả lời, bỏ bản trùng.
         if (message.eid && this.seenEvent(machine, String(message.eid))) return;
         this.appendEvent(message.id, message.ev);
         return;
       case 'delta':
+        if (!this.ownsSession(machine, message.id)) return this.refuseForeign(machine, 'delta', message.id);
         this.queueDelta(message.id, message.text);
         return;
       case 'external':
@@ -350,7 +373,10 @@ export class Hub extends EventEmitter {
         this.tokenBook.record(machine.id, machine.alias || machine.name, message);
         return;
       case 'route':
-        this.route(message.from, message.to, message.text, message.needsAction).then(
+        // Tin giữa các phiên chỉ được gửi nhân danh một phiên đang chạy trên chính máy gửi.
+        (this.sessions.get(message.from)?.snap.machineId === machine.id
+          ? this.route(message.from, message.to, message.text, message.needsAction)
+          : Promise.reject(new Error('Phiên này không chạy trên máy gửi lệnh.'))).then(
           (data) => link.send({ op: 'reply', rid: message.rid, ok: true, data }),
           (err) => link.send({ op: 'reply', rid: message.rid, ok: false, error: err.message }),
         );
