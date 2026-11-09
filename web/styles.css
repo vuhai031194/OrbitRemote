@@ -2801,3 +2801,7 @@ html.float-moving, html.float-moving * { cursor: var(--float-cursor, grabbing) !
 .card-pending-text { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-pending-actions { display: inline-flex; gap: 6px; margin-left: auto; }
 .card-pending-actions .btn { min-height: 36px; }
+
+/* Ô tìm phiên ở màn chính (home.js). */
+.home-search { width: 100%; margin: 4px 0 10px; min-height: 42px; }
+.search-results { display: flex; flex-direction: column; gap: 8px; }

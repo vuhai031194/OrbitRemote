@@ -170,7 +170,7 @@ function lastSeenText(iso) {
 
 // Phiên đang mở ngoài app (VS Code, terminal) trên máy: một dòng bấm được, mở màn xem phiên đó (chỉ đọc, từ đó tiếp
 // tục hay tách nhánh ở app). Trước đây màn chính chỉ hiện con số "n ngoài app".
-function externalLine(machineId, t) {
+export function externalLine(machineId, t) {
   return h('a', { class: 'tree-ext', href: `#/x/${machineId}/${t.claudeSessionId}` },
     h('span', { class: 'status-dot' }),
     h('span', { class: 'tree-ext-name' }, t.title || '(chưa có câu hỏi)'),

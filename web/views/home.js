@@ -9,7 +9,8 @@ import { actionsFor, runAction } from '../lib/custom.js';
 import { openNewSession } from './sheets.js';
 import { enrollmentCards } from './machines.js';
 import { isOpenGroup, addToGroup } from './group.js';
-import { homeTree } from './tree.js';
+import { externalLine, homeTree } from './tree.js';
+import { searchSessions } from '../lib/search.js';
 import { enableSessionDrag, isDragging } from '../lib/drag.js';
 import { modelUpdateButton, sessionModel } from '../lib/models.js';
 import { openClaudeLogin } from './claude-login.js';
@@ -98,6 +99,16 @@ export function mountHome(root) {
   const enrollSlot = h('div', { class: 'enroll-slot' });
   const quickRow = h('div', { class: 'chip-row quick-row' });
   const list = h('div', { class: 'home-list' });
+  // Tìm phiên (lib/search.js): gõ là danh sách phẳng các phiên khớp thay cho cây; xoá chữ là về cây.
+  let query = '';
+  const searchBox = h('input', {
+    class: 'input home-search', type: 'search', placeholder: 'Tìm phiên: tên, thư mục, máy…', 'aria-label': 'Tìm phiên',
+    autocomplete: 'off', spellcheck: 'false',
+    oninput: (e) => {
+      query = e.target.value;
+      renderList();
+    },
+  });
   const channelBadge = h('span', { class: 'badge hidden' });
 
   // Cài đặt và Kênh: bấm lần nữa khi đang mở thì đóng, về đúng màn đang xem trước đó (bản PC hai cột,
@@ -121,7 +132,7 @@ export function mountHome(root) {
       brandSlot,
       h('div', { class: 'topbar-actions' }, channelBtn, settingsBtn, usage.button, models.button),
       usage.pop),
-    h('main', { class: 'scroll home-scroll' }, enrollSlot, quickRow, list),
+    h('main', { class: 'scroll home-scroll' }, enrollSlot, quickRow, searchBox, list),
     h('button', { class: 'fab', 'aria-label': 'Mở phiên mới', onclick: () => openNewSession() }, icon('plus', 26)));
 
   function renderBrand() {
@@ -157,6 +168,13 @@ export function mountHome(root) {
         h('div', { class: 'empty-orb' }),
         h('div', { class: 'empty-title' }, 'Chưa có máy nào'),
         h('div', { class: 'empty-text' }, 'Bật một máy có Orbit Remote lên là nó tự xin nối vào trạm, rồi mở phiên Claude trên máy đó bằng nút +.')));
+      return;
+    }
+    if (query.trim()) {
+      const found = searchSessions(query, store.sessions, store.machines);
+      list.append(found.length
+        ? h('div', { class: 'cards search-results' }, found.map((x) => (x.kind === 'app' ? sessionCard(x.s) : externalLine(x.machineId, x.t))))
+        : h('div', { class: 'tree-empty' }, 'Không thấy phiên nào khớp. Phiên cũ đã đóng: mở màn của máy, nút "Phiên".'));
       return;
     }
     list.append(homeTree());

@@ -94,3 +94,24 @@ test('thông báo: báo khi phiên vừa cần duyệt hay vừa xong lượt l�
   listeners.session({ id: 'a', name: 'A', status: 'idle' });
   assert.equal(shown.length, 1, 'đã tắt');
 });
+
+test('tìm phiên: không phân biệt dấu, hoa thường; mọi từ phải khớp; gồm phiên ngoài app (trừ phiên app đã giữ); đang chạy lên trước', async () => {
+  const { searchSessions } = await import('../web/lib/search.js');
+  const machines = new Map([
+    ['m1', { id: 'm1', name: 'Máy Công Ty', online: true, external: [
+      { claudeSessionId: 'c-ext', title: 'Sửa lỗi đăng nhập ở VS Code', cwd: 'D:/Zitga/qa-portal', modified: '2026-11-09T09:00:00Z' },
+      { claudeSessionId: 'c-app', title: 'Trùng phiên app', cwd: 'D:/x', modified: '2026-11-09T09:00:00Z' },
+    ] }],
+    ['m2', { id: 'm2', name: 'Mac', online: false, external: [{ claudeSessionId: 'c-off', title: 'sửa lỗi', cwd: '/x' }] }],
+  ]);
+  const sessions = new Map([
+    ['a', { id: 'a', name: 'Sửa lỗi build', status: 'stopped', machineId: 'm1', cwd: 'D:/Zitga/PigLoop', claudeSessionId: 'c-app', lastActivity: '2026-11-09T10:00:00Z' }],
+    ['b', { id: 'b', name: 'Viết test', status: 'busy', machineId: 'm1', cwd: 'D:/Zitga/qa-portal', lastText: 'Đã sửa lỗi xong', lastActivity: '2026-11-09T08:00:00Z' }],
+  ]);
+  const ids = (q) => searchSessions(q, sessions, machines).map((x) => (x.kind === 'app' ? x.s.id : x.t.claudeSessionId));
+  assert.deepEqual(ids('sua loi'), ['c-ext', 'b', 'a'], 'đang chạy trước (mới hoạt động gần nhất trước), phiên đã dừng sau; phiên ngoài app của máy tắt thì bỏ');
+  assert.deepEqual(ids('SỬA qa-portal'), ['c-ext', 'b'], 'mọi từ đều phải khớp');
+  assert.deepEqual(ids('cong ty pigloop'), ['a'], 'khớp cả tên máy');
+  assert.deepEqual(ids('trùng'), [], 'phiên ngoài app mà app đang giữ thì không lặp');
+  assert.deepEqual(ids('   '), []);
+});
