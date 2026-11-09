@@ -21,8 +21,8 @@ import net from 'node:net';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
-import { networkInterfaces } from 'node:os';
-import { join } from 'node:path';
+import { homedir, networkInterfaces } from 'node:os';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { APP_PORT, startAppProxy } from './app-proxy.mjs';
@@ -39,7 +39,7 @@ import { isPrivate } from './netaddr.mjs';
 import { findTailscale, readTailscaleStatus, tailnetFromStatus, tailnetUrls } from './tailnet.mjs';
 import { APP_PROFILE_DIR, openAppWindow } from './pc-app.mjs';
 import { keepUserActions, pullRepo, runSetup, safeUpdate } from './setup.mjs';
-import { crashDecision, spawnMain, spawnMainLater } from './launch.mjs';
+import { LAUNCHD_LABEL, crashDecision, launchdPlist, spawnMain, spawnMainLater } from './launch.mjs';
 import { loadGrantKey, loadHubKey } from './hub-identity.mjs';
 import { REPO_HUB, publishRepoHub, repoHub, repoHubUrls } from './hub-decl.mjs';
 
@@ -546,8 +546,28 @@ async function runJoin(hubUrl, code) {
 
 // Tự chạy "ensure" mỗi lần đăng nhập Windows, ẩn. Dùng VBScript vì đó là cách gọn nhất để
 // chạy một lệnh không kèm cửa sổ console từ thư mục Startup.
+// macOS: LaunchAgent của người dùng (launch.mjs launchdPlist) chạy "ensure" lúc đăng nhập và mỗi 5 phút.
+function autostartMac(mode) {
+  const file = join(homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
+  const domain = `gui/${process.getuid()}`;
+  if (mode === 'off') {
+    spawnSync('launchctl', ['bootout', domain, file], { stdio: 'ignore' });
+    rmSync(file, { force: true });
+    log('Đã tắt tự chạy. Trạm hay đầu máy đang chạy (nếu có) vẫn chạy tới khi tắt máy.');
+    return;
+  }
+  if (mode !== 'on') throw new Error('Cách dùng: node src/main.mjs autostart on|off');
+  ensureDir(dirname(file));
+  writeFileSync(file, launchdPlist({ node: process.execPath, main: SELF, log: join(STATE_DIR, 'ensure.log'), workdir: TOOL_DIR }));
+  spawnSync('launchctl', ['bootout', domain, file], { stdio: 'ignore' }); // đã nạp bản cũ thì gỡ trước
+  const r = spawnSync('launchctl', ['bootstrap', domain, file], { encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`launchctl không nạp được ${file}: ${(r.stderr || '').trim()}`);
+  log(`Đã bật tự chạy: ${file} (lúc đăng nhập và mỗi 5 phút; nhật ký ở ensure.log).`);
+}
+
 function runAutostart(mode) {
-  if (process.platform !== 'win32') throw new Error('Lệnh autostart hiện chỉ làm cho Windows.');
+  if (process.platform === 'darwin') return autostartMac(mode);
+  if (process.platform !== 'win32') throw new Error('Lệnh autostart hiện làm cho Windows và macOS.');
   const file = AUTOSTART_FILE;
   if (mode === 'off') {
     rmSync(file, { force: true });

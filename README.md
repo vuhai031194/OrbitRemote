@@ -83,8 +83,9 @@ they run on different machines.
 
 ## Requirements
 
-- **Windows 10 or 11** for the full feature set (screen, mouse and keyboard, power, temperatures). The installer and
-  autostart only support Windows today; on macOS or Linux run `node src/main.mjs node` by hand (hub, sessions and
+- **Windows 10 or 11** for the full feature set (screen, mouse and keyboard, power, temperatures). The installer only
+  supports Windows today. On macOS run `node src/main.mjs autostart on` once: a LaunchAgent starts the machine agent
+  at login and every 5 minutes if it is not running. On Linux run `node src/main.mjs node` by hand (hub, sessions and
   messaging; not tested much outside Windows).
 - **Node.js 22+**, **Git**, and **Claude Code** signed in. `setup.cmd` installs whatever is missing with winget, including
   `ffmpeg`.

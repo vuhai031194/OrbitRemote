@@ -70,8 +70,9 @@ khiển màn hình máy, cho các phiên nhắn tin và làm việc nhóm với 
 
 ## Cần gì
 
-- **Windows 10 hay 11** cho đầy đủ tính năng (màn hình, chuột phím, tắt bật máy, nhiệt độ). Bộ cài và tự chạy hiện chỉ
-  làm cho Windows; trên macOS hay Linux thì chạy tay `node src/main.mjs node` (phần trạm, phiên và nhắn tin, chưa kiểm kỹ
+- **Windows 10 hay 11** cho đầy đủ tính năng (màn hình, chuột phím, tắt bật máy, nhiệt độ). Bộ cài hiện chỉ làm cho
+  Windows. Trên macOS chạy `node src/main.mjs autostart on` một lần: một LaunchAgent dựng đầu máy lúc đăng nhập và mỗi 5
+  phút nếu nó chưa chạy. Trên Linux thì chạy tay `node src/main.mjs node` (phần trạm, phiên và nhắn tin, chưa kiểm kỹ
   ngoài Windows).
 - **Node.js 22+**, **Git**, **Claude Code** đã đăng nhập. `setup.cmd` tự cài những thứ còn thiếu bằng winget, kể cả
   `ffmpeg`.

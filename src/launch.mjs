@@ -58,3 +58,29 @@ export function crashDecision(times, now = Date.now()) {
   recent.push(now);
   return { times: recent, respawn: recent.length <= CRASH_MAX };
 }
+
+// ---- Tự chạy trên macOS (launchd) ------------------------------------------------------------------
+// main.mjs autostart on (macOS): một LaunchAgent của người dùng chạy "ensure" lúc đăng nhập và mỗi 5 phút. ensure dựng
+// trạm hay đầu máy nếu chưa chạy, nên cũng là người canh: tiến trình chết thì vài phút sau tự dựng lại.
+// AbandonProcessGroup: "ensure" dựng tiến trình tách riêng rồi thoát; launchd không được giết theo.
+export const LAUNCHD_LABEL = 'com.orbitremote.ensure';
+const xml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+export function launchdPlist({ node, main, log, workdir, intervalSec = 300 }) {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    '<dict>',
+    `  <key>Label</key><string>${LAUNCHD_LABEL}</string>`,
+    `  <key>ProgramArguments</key><array><string>${xml(node)}</string><string>${xml(main)}</string><string>ensure</string></array>`,
+    `  <key>WorkingDirectory</key><string>${xml(workdir)}</string>`,
+    '  <key>RunAtLoad</key><true/>',
+    `  <key>StartInterval</key><integer>${Math.max(60, Math.floor(intervalSec))}</integer>`,
+    '  <key>AbandonProcessGroup</key><true/>',
+    `  <key>StandardOutPath</key><string>${xml(log)}</string>`,
+    `  <key>StandardErrorPath</key><string>${xml(log)}</string>`,
+    '</dict>',
+    '</plist>',
+    '',
+  ].join('\n');
+}

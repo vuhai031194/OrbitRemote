@@ -128,7 +128,11 @@ async function allowClosing(ctx, what) {
 
 // Tiến trình trạm và đầu máy Orbit Remote đang chạy trên máy: mã, vai, lúc mở, số phiên Claude con.
 function orbitProcesses() {
-  if (!isWin) return [];
+  if (!isWin) {
+    // macOS, Linux: trước đây trả rỗng, nên "Setup máy" trên Mac luôn báo "chưa chạy" rồi dựng lại đầu máy.
+    const r = spawnSync('ps', ['-axo', 'pid=,ppid=,lstart=,command='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+    return r.status === 0 ? parsePs(r.stdout) : [];
+  }
   const script = String.raw`
 $out = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ForEach-Object {
   if ($_.CommandLine -match '[\\/]src[\\/]main\.mjs"?\s+(hub|node)\b') {
@@ -878,4 +882,22 @@ export async function safeUpdate(repo, { pull, head = gitHead, selftest, reset, 
     : `code mới (${after.slice(0, 7)}) không chạy được: ${t.why}. Không quay về bản trước được: ${back.why}.`;
   log(rolledBack);
   return { failed: true, pulled: `không kéo được: ${rolledBack}`, rolledBack };
+}
+
+// Tiến trình trạm và đầu máy trên macOS, Linux từ `ps -axo pid=,ppid=,lstart=,command=` (Windows dùng PowerShell ở
+// orbitProcesses). Trả như orbitProcesses: [{ pid, mode, started (ISO), children (số tiến trình claude con) }].
+export function parsePs(text) {
+  const rows = [];
+  for (const line of String(text || '').split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/.exec(line);
+    if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), started: new Date(m[3].replace(/\s+/g, ' ')), command: m[4] });
+  }
+  const out = [];
+  for (const r of rows) {
+    const mode = /[\/]src[\/]main\.mjs"?\s+(hub|node)\b/.exec(r.command)?.[1];
+    if (!mode || Number.isNaN(r.started.getTime())) continue;
+    const children = rows.filter((c) => c.ppid === r.pid && /(^|[\/])claude(\s|$)|claude-code/.test(c.command)).length;
+    out.push({ pid: r.pid, mode, started: r.started.toISOString(), children });
+  }
+  return out;
 }
