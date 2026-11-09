@@ -53,3 +53,44 @@ test('service worker lưu sẵn đủ mọi file thư viện và màn của app 
   const app = readFileSync(join(WEB, 'app.js'), 'utf8');
   for (const m of app.matchAll(/from '\.\/((?:lib|views)\/[^']+)'/g)) assert.ok(listed.has(`/${m[1]}`), `/${m[1]} chưa có trong danh sách của sw.js`);
 });
+
+test('thông báo: báo khi phiên vừa cần duyệt hay vừa xong lượt lúc không xem app; không báo khi đang xem, khi vừa nối lại (nạp cả danh sách), hay khi đã tắt', async () => {
+  class FakeNotification { constructor() {} }
+  FakeNotification.permission = 'granted';
+  define('Notification', FakeNotification);
+  define('isSecureContext', true);
+  const mem = new Map();
+  define('localStorage', { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) });
+  const { trackNotifications, notifyReason, setNotifyOff, notifySupported } = await import('../web/lib/notify.js');
+  assert.equal(notifySupported(), true);
+  assert.equal(notifyReason('busy', { name: 'A', status: 'waiting' }).title, 'A cần duyệt');
+  assert.equal(notifyReason('busy', { name: 'A', status: 'idle', lastText: 'Xong rồi' }).body, 'Xong rồi');
+  assert.equal(notifyReason(undefined, { name: 'A', status: 'waiting' }), null, 'phiên mới thấy lần đầu: không báo');
+  assert.equal(notifyReason('idle', { name: 'A', status: 'busy' }), null);
+
+  const listeners = {};
+  const store = { sessions: new Map([['a', { id: 'a', name: 'A', status: 'busy' }]]), on: (t, fn) => { listeners[t] = fn; } };
+  const shown = [];
+  let watching = false;
+  trackNotifications(store, { show: (why, id) => shown.push([why.title, id]), visible: () => watching });
+  listeners.session({ id: 'a', name: 'A', status: 'waiting' });
+  assert.deepEqual(shown, [['A cần duyệt', 'a']]);
+  listeners.session({ id: 'a', name: 'A', status: 'waiting' });
+  assert.equal(shown.length, 1, 'vẫn chờ duyệt: không báo lại');
+
+  watching = true;
+  listeners.session({ id: 'a', name: 'A', status: 'busy' });
+  listeners.session({ id: 'a', name: 'A', status: 'idle' });
+  assert.equal(shown.length, 1, 'đang xem app: không báo');
+
+  watching = false;
+  store.sessions.set('a', { id: 'a', name: 'A', status: 'waiting' });
+  listeners.state();
+  listeners.session({ id: 'a', name: 'A', status: 'waiting' });
+  assert.equal(shown.length, 1, 'vừa nối lại: trạng thái nạp lại không thành thông báo');
+
+  setNotifyOff(true);
+  listeners.session({ id: 'a', name: 'A', status: 'busy' });
+  listeners.session({ id: 'a', name: 'A', status: 'idle' });
+  assert.equal(shown.length, 1, 'đã tắt');
+});

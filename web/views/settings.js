@@ -5,6 +5,35 @@ import { icon } from '../lib/icons.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { openPairSheet } from './pair.js';
+import { notifyEnabled, notifySupported, setNotifyOff } from '../lib/notify.js';
+
+// Bật, tắt thông báo khi phiên cần duyệt hay xong lượt (lib/notify.js). Trình duyệt chỉ cho ở trang an toàn.
+function notifyBlock() {
+  const box = h('div');
+  const render = () => {
+    clear(box);
+    if (!notifySupported()) {
+      box.append(h('div', { class: 'field-hint' }, 'Trình duyệt chỉ cho thông báo ở trang an toàn (HTTPS hay 127.0.0.1). Ở bản PC (lối tắt Orbit Remote) thì bật được; mở trạm qua http://<địa chỉ IP> trên điện thoại thì chưa. Trong app vẫn có nút "… cần duyệt" nổi trên mọi màn.'));
+      return;
+    }
+    const on = notifyEnabled();
+    const denied = Notification.permission === 'denied';
+    box.append(
+      h('div', { class: 'field-hint' }, denied
+        ? 'Trình duyệt đang chặn thông báo của trang này: mở cài đặt trang (biểu tượng ổ khoá cạnh địa chỉ) để cho phép.'
+        : 'Báo khi một phiên cần duyệt hay vừa xong lượt, lúc cửa sổ app đang không được xem.'),
+      denied ? null : h('button', { class: `btn block${on ? '' : ' primary'}`, type: 'button', onclick: async () => {
+        if (on) setNotifyOff(true);
+        else {
+          setNotifyOff(false);
+          if (Notification.permission !== 'granted') await Notification.requestPermission().catch(() => {});
+        }
+        render();
+      } }, on ? 'Tắt thông báo' : 'Bật thông báo'));
+  };
+  render();
+  return box;
+}
 
 const ACTIONS_EXAMPLE = `{
   "actions": [
@@ -152,6 +181,7 @@ export function mountSettings(root) {
             h('div', { class: 'list-sub' }, m.online ? 'Đang nối' : `Đang tắt · thấy ${timeAgo(m.lastSeen)} trước`)),
           h('span', { class: `mini-dot ${m.online ? 'on' : 'off'}` }), icon('chevron', 16)))),
         h('div', { class: 'field-hint' }, 'Máy nào chạy Orbit Remote (setup.cmd bật tự chạy khi đăng nhập Windows) thì tự tìm trạm và xin nối; bạn chỉ bấm duyệt một lần ở màn chính. Máy đã nối được nhớ mãi, kể cả lúc đang tắt.')),
+      section('Thông báo', notifyBlock()),
       section('Thiết bị đã ghép', devicesBox,
         h('button', { class: 'btn primary block', onclick: openPairSheet }, icon('plus', 16), 'Ghép điện thoại bằng mã QR'),
         h('button', { class: 'btn ghost block small', onclick: showJoinCommand }, 'Nối máy ở mạng khác'), pairBox),

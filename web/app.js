@@ -3,6 +3,7 @@
 import { h, clear, toast } from './lib/dom.js';
 import { icon } from './lib/icons.js';
 import { waitingSummary } from './lib/waiting.js';
+import { trackNotifications } from './lib/notify.js';
 import { api, ApiError } from './lib/api.js';
 import { store } from './lib/store.js';
 import { loadExtension } from './lib/custom.js';
@@ -264,6 +265,7 @@ async function start() {
     store.on('open-new-session', (preset) => openNewSession(preset));
     store.on('update-ready', showUpdateBar);
     trackWaiting();
+    trackNotifications(store); // báo khi phiên cần duyệt hay xong lượt lúc cửa sổ không được xem (lib/notify.js)
     store.connect();
     store.loadActions();
     store.loadTokens();
