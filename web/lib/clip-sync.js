@@ -17,6 +17,11 @@
 export const AUTO_MAX = 64 * 1024 * 1024;
 const CLIP_HEADER = 9;
 const STATE = new Map(); // máy -> { lastLocalSig, localAt, remoteAt, lastPushedSig }, giữ qua các lần mở màn
+// localAt và remoteAt chỉ để biết bên nào đổi SAU: dùng số đếm tăng dần chứ không dùng giờ. Hai việc trong cùng một
+// mili-giây thì Date.now() bằng nhau, "mới hơn" thành sai và Ctrl+V dán nhầm clipboard của máy kia (phép kiểm bắt
+// được: lúc được lúc không).
+let order = 0;
+const nextStamp = () => ++order;
 
 const stateOf = (id) => {
   if (!STATE.has(id)) STATE.set(id, { lastLocalSig: undefined, localAt: 0, remoteAt: 0, lastPushedSig: undefined });
@@ -121,7 +126,7 @@ export function createClipSync(machineId, ui) {
 
   const caps = () => Boolean(ui.client()?.caps?.clip);
   const synced = () => {
-    const now = Date.now();
+    const now = nextStamp();
     st.localAt = now;
     st.remoteAt = now;
   };
@@ -177,7 +182,7 @@ export function createClipSync(machineId, ui) {
     if (!sig) return pasteThere(shift);
     if (sig !== st.lastLocalSig) {
       // Lần đầu thấy thì không biết copy lúc nào: coi như cũ hơn mọi lần copy trên máy kia đã biết.
-      st.localAt = st.lastLocalSig === undefined ? 0 : Date.now();
+      st.localAt = st.lastLocalSig === undefined ? 0 : nextStamp();
       st.lastLocalSig = sig;
     }
     const newer = st.localAt > st.remoteAt || (st.remoteAt === 0 && sig !== st.lastPushedSig);
@@ -229,7 +234,7 @@ export function createClipSync(machineId, ui) {
       st.remoteAt = st.localAt;
       return;
     }
-    st.remoteAt = Date.now();
+    st.remoteAt = nextStamp();
     const hasLocal = await localClip.available();
     if (m.kind === 'text') {
       const applied = () => { st.lastLocalSig = sig; st.localAt = st.remoteAt; };
@@ -270,7 +275,7 @@ export function createClipSync(machineId, ui) {
     const sig = offer.kind === 'text' ? clipSignature(offer.text) : clipSignature('', offerTops(items));
     if (!sig || sig === st.lastLocalSig) return;
     st.lastLocalSig = sig;
-    st.localAt = Date.now();
+    st.localAt = nextStamp();
     if (!ui.live() || !caps()) return; // Ctrl+V sau này sẽ đưa sang
     const client = ui.client();
     if (offer.kind === 'text') {
@@ -308,7 +313,7 @@ export function createClipSync(machineId, ui) {
     onPaste,
     onRemote,
     pasteThere,
-    remoteCopied() { st.remoteAt = Date.now(); }, // Ctrl+C, Ctrl+X gửi sang máy kia
+    remoteCopied() { st.remoteAt = nextStamp(); }, // Ctrl+C, Ctrl+X gửi sang máy kia
     // Máy kia vừa báo làm được việc dán (mỗi lần nối lại cũng vậy): bảo nó báo mỗi lần có ai copy bên đó,
     // và theo dõi clipboard máy này nếu có đầu máy ở đây.
     async start() {

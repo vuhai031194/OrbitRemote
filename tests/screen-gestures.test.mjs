@@ -900,6 +900,11 @@ test('bản PC (chuột thật): bấm vào hình là bàn phím của máy tín
 
 test('dán từ máy này: copy ở máy này rồi Ctrl+V trên hình là dán sang máy kia (chữ, tệp, cả thư mục); copy trên máy kia rồi dán bên đó vẫn dán clipboard máy kia; máy bản cũ dán như trước', async () => {
   media.coarse.flip(false);
+  // Đồng hồ đứng yên: mọi việc "trong cùng một mili-giây". Bên nào đổi sau phải được biết theo thứ tự chứ không theo
+  // giờ (clip-sync.js nextStamp); so theo Date.now() thì bằng nhau và dán nhầm clipboard máy kia (từng hỏng lúc
+  // được lúc không khi máy nhanh).
+  const realNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
   try {
     const { container, viewport, ws, reset } = await openPanel('touch');
     const sink = container.find('kbd-sink');
@@ -912,7 +917,7 @@ test('dán từ máy này: copy ở máy này rồi Ctrl+V trên hình là dán 
     // Đọc tệp (Blob) chạy ở luồng nền: máy đang bận thì quá 12 lượt chờ, phép kiểm từng hỏng lúc được lúc không.
     // Chờ tới khi điều kiện đúng (tối đa 5 giây) thay vì đếm lượt.
     const until = async (fn) => {
-      for (const end = Date.now() + 5000; !fn() && Date.now() < end;) await new Promise((r) => setTimeout(r, 5));
+      for (const end = performance.now() + 5000; !fn() && performance.now() < end;) await new Promise((r) => setTimeout(r, 5));
       return fn();
     };
     const clip = ({ text = '', files = [], entries = [] }) => ({
@@ -986,6 +991,7 @@ test('dán từ máy này: copy ở máy này rồi Ctrl+V trên hình là dán 
     await new Promise((r) => setTimeout(r, 450));
     assert.deepEqual(keys(), ['17↓', '16↓', '86↓', '86↑', '16↑', '17↑'], 'Ctrl+Shift+V (dán chữ trơn) sang máy kia giữ Shift');
   } finally {
+    Date.now = realNow;
     media.coarse.flip(true);
     globalThis.document.activeElement = null;
   }
