@@ -40,6 +40,7 @@ import { findTailscale, readTailscaleStatus, tailnetFromStatus, tailnetUrls } fr
 import { APP_PROFILE_DIR, openAppWindow } from './pc-app.mjs';
 import { pullRepo, runSetup } from './setup.mjs';
 import { crashDecision, spawnMain, spawnMainLater } from './launch.mjs';
+import { loadHubKey } from './hub-identity.mjs';
 import { REPO_HUB, publishRepoHub, repoHub, repoHubUrls } from './hub-decl.mjs';
 
 const VERSION = readJson(join(TOOL_DIR, 'package.json'), {}).version || '0';
@@ -232,6 +233,7 @@ async function runHub() {
   let localClip = null; // clipboard của máy này cho cửa sổ app mở ngay trên máy giữ trạm (gắn khi đầu máy dựng xong)
   const server = createServer({
     hub, auth, localSecret: secret, version: VERSION, hubInfo,
+    hubKey: loadHubKey(join(STATE_DIR, 'hub-key.json')), // danh tính trạm cho máy chạy phiên ghim (hub-identity.mjs)
     localClip: (req, res) => {
       if (localClip) return localClip(req, res);
       res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -522,6 +524,10 @@ async function runJoin(hubUrl, code) {
   const info = await pingRes.json().catch(() => ({}));
   if (info.service !== 'orbit-remote') throw new Error(`${hubUrl} không phải trạm Orbit Remote.`);
   const patch = { hubId: info.hubId, hubName: info.hubName, urls: [...new Set([hubUrl, ...(info.urls || [])])], pausedUntil: 0 };
+  // Người dùng tự chỉ trạm: tin lại từ đầu. Bỏ khoá đã ghim (lần nối tới đầu tiên ghim khoá của trạm này, kể cả khi
+  // trạm vừa đổi khoá), và bỏ thẻ của trạm khác (thẻ chỉ dùng được với trạm đã cấp nó).
+  patch.hubKey = null;
+  if (readJson(NODE_FILE, {}).hubId !== info.hubId) patch.token = null;
   if (code) {
     const res = await fetch(new URL('/api/pair', hubUrl), {
       method: 'POST',

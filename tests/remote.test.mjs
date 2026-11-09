@@ -55,6 +55,8 @@ const { Hub } = await import('../src/hub.mjs');
 const { Auth } = await import('../src/auth.mjs');
 const { NodeAgent } = await import('../src/node-agent.mjs');
 const { createServer } = await import('../src/server.mjs');
+const { loadHubKey, newNonce, verifyHub } = await import('../src/hub-identity.mjs');
+const hubKey = loadHubKey(join(ROOT, 'hub-key.json'));
 const { runNodeLoop } = await import('../src/node-runner.mjs');
 const { startDiscoveryResponder, discoverHubs } = await import('../src/discovery.mjs');
 const { writeJsonAtomic, readJson } = await import('../src/paths.mjs');
@@ -140,7 +142,7 @@ async function call(path, body, method = body === undefined ? 'GET' : 'POST') {
 before(async () => {
   auth = new Auth(join(process.env.ORBIT_REMOTE_STATE, 'auth.json'));
   hub = new Hub();
-  server = createServer({ hub, auth, localSecret: 'test-secret', version: 'test', hubInfo: () => ({ id: 'hubX', name: 'TramThu', urls: [] }), onRestart: () => { hubRestarts += 1; return 'restart.log'; } });
+  server = createServer({ hub, auth, localSecret: 'test-secret', version: 'test', hubKey, hubInfo: () => ({ id: 'hubX', name: 'TramThu', urls: [] }), onRestart: () => { hubRestarts += 1; return 'restart.log'; } });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   port = server.address().port;
 
@@ -377,6 +379,14 @@ test('hai máy: phiên ở máy A nhắn cho phiên ở máy B qua vỏ MCP th�
   const saved = readJson(NODE_STATE, {});
   assert.equal(saved.hubId, 'hubX', 'máy B nhớ trạm theo mã');
   assert.ok(saved.token, 'máy B giữ thẻ để lần sau tự nối');
+  assert.equal(saved.hubKey, hubKey.publicKey, 'máy B ghim khoá của đúng trạm đã duyệt nó, và vẫn nối được');
+
+  // Trạm ký số ngẫu nhiên của bất kỳ ai hỏi, không cần thẻ; số ngẫu nhiên sai dạng thì từ chối.
+  const nonce = newNonce();
+  const id = await (await fetch(`http://127.0.0.1:${port}/api/identity?nonce=${nonce}`)).json();
+  assert.equal(id.hubId, 'hubX');
+  assert.equal(verifyHub(hubKey.publicKey, 'hubX', nonce, id.sig), true);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/api/identity?nonce=xyz`)).status, 400);
 
   const b = await call('/api/sessions', { machineId: 'mB0001', name: 'Beta', cwd: WORK });
   assert.equal(b.status, 200, JSON.stringify(b.data));

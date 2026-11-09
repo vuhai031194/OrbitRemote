@@ -10,6 +10,7 @@ import { discoverHubs } from './discovery.mjs';
 import { connectOnce } from './remote-link.mjs';
 import { readJson, writeJsonAtomic } from './paths.mjs';
 import { repoHubUrls } from './hub-decl.mjs';
+import { checkHub } from './hub-identity.mjs';
 
 const PAUSE_AFTER_REFUSAL_MS = 24 * 60 * 60 * 1000;
 const ENROLL_POLL_MS = 3000;
@@ -62,7 +63,7 @@ async function enroll(hub, machine, { log, signal }) {
     } catch {
       continue; // trạm chập chờn: hỏi lại nhịp sau
     }
-    if (poll.status === 'approved' && poll.token) return { token: poll.token, url };
+    if (poll.status === 'approved' && poll.token) return { token: poll.token, url, hubKey: typeof poll.hubKey === 'string' ? poll.hubKey : null };
     if (poll.status === 'rejected') return { token: null, reason: 'rejected' };
     if (poll.status === 'expired') return { token: null, reason: 'expired' };
   }
@@ -108,13 +109,24 @@ export async function runNodeLoop(agent, { stateFile, port, log = () => {}, sign
         await sleep(backoff, signal);
         continue;
       }
-      state = save({ token: result.token, pausedUntil: 0 });
+      state = save({ token: result.token, pausedUntil: 0, ...(result.hubKey ? { hubKey: result.hubKey } : {}) });
       log('Trạm đã duyệt máy này.');
     }
 
     let linked = false;
     for (const url of state.urls) {
       if (signal?.aborted) return;
+      // Chỉ gửi thẻ tới địa chỉ chứng minh được là đúng trạm đã ghim (hub-identity.mjs). Địa chỉ lấy từ việc dò trạm
+      // thì ai trên cùng mạng cũng khai được.
+      const id = await checkHub(url, state);
+      if (!id.ok) {
+        if (id.reason === 'mismatch') log(`Bỏ qua ${url}: không chứng minh được là trạm ${state.hubName || state.hubId} (khoá không khớp).`);
+        continue;
+      }
+      if (id.key && !state.hubKey) {
+        state = save({ hubKey: id.key });
+        log('Đã ghim danh tính của trạm.');
+      }
       const r = await connectOnce(agent, { hubUrl: url, token: state.token, log, signal });
       if (r.reason === 'unauthorized') {
         log('Trạm đã thu hồi thẻ của máy này. Nghỉ một ngày rồi mới xin nối lại.');

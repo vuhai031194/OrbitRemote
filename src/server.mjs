@@ -14,6 +14,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, relative, sep } from 'node:path';
 import { CUSTOM_DIR, WEB_DIR, writeJsonAtomic } from './paths.mjs';
+import { NONCE } from './hub-identity.mjs';
 
 // Dấu của bản giao diện trạm đang phát: băm nội dung mọi file trong web/ lúc trạm khởi động. Số phiên bản trong
 // package.json ít khi đổi, còn dấu này đổi theo đúng từng lần sửa giao diện.
@@ -171,7 +172,7 @@ async function serveStatic(res, root, rel, extraConnect = '') {
   res.end(data);
 }
 
-export function createServer({ hub, auth, localSecret, version, hubInfo = () => ({}), onLocalShutdown = null, onRestart = null, localClip = null }) {
+export function createServer({ hub, auth, localSecret, version, hubInfo = () => ({}), onLocalShutdown = null, onRestart = null, localClip = null, hubKey = null }) {
   const appClients = new Set();
   const nodeLinks = new Map(); // linkId -> { receive, disconnect }
 
@@ -568,6 +569,16 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
       return localClip(req, res);
     }
 
+    // Danh tính trạm (hub-identity.mjs): ký số ngẫu nhiên máy chạy phiên gửi tới, để nó biết chắc đây là trạm nó đã
+    // ghim rồi mới gửi thẻ. Không cần thẻ: chữ ký chẳng lộ gì ngoài khoá công khai.
+    if (path === '/api/identity' && req.method === 'GET') {
+      if (!hubKey) throw new HttpError(404, 'Trạm này chưa có danh tính.');
+      const nonce = url.searchParams.get('nonce') || '';
+      if (!NONCE.test(nonce)) throw new HttpError(400, 'Số ngẫu nhiên không hợp lệ.');
+      const hubId = hubInfo().id;
+      return sendJson(res, 200, { hubId, key: hubKey.publicKey, sig: hubKey.sign(hubId, nonce) });
+    }
+
     // Trạm tự giới thiệu: đầu máy dò tìm nhận ra trạm bằng chính câu trả lời này.
     if (path === '/api/ping') {
       const info = hubInfo();
@@ -595,7 +606,8 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
     if (req.method === 'GET' && enrollPoll) {
       const result = auth.pollEnroll(enrollPoll[1], req.headers['x-orbit-poll']);
       if (result.status === 'approved' || result.status === 'rejected') pushEnrollments();
-      return sendJson(res, 200, result);
+      // Thẻ đi kèm khoá công khai của trạm: máy vừa được duyệt ghim ngay khoá của đúng trạm đã cấp thẻ.
+      return sendJson(res, 200, result.token && hubKey ? { ...result, hubKey: hubKey.publicKey } : result);
     }
 
     if (req.method === 'POST' && path === '/api/pair') {
