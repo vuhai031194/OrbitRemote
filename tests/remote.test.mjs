@@ -234,6 +234,54 @@ test('trạm: chặn khi chưa ghép đôi, ghép đôi, mở phiên, luồng SS
   assert.equal(hub.sessions.get(id).snap.claudeSessionId, created.data.claudeSessionId, 'nối lại đúng phiên Claude cũ');
 });
 
+test('mở lại phiên cũ mà app đã giữ: dùng lại đúng bản ghi đó, không dựng bản ghi thứ hai; chạy lại khi phiên Claude đang chạy ở mục khác thì từ chối', async () => {
+  // Có một lượt để phiên có nhật ký: Claude Code (và bản giả) không nối tiếp được phiên chưa có nhật ký.
+  const created = await call('/api/sessions', { machineId: 'mA', name: 'Mở lại', cwd: WORK, prompt: 'hello' });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const id = created.data.id;
+  await waitFor(() => hub.sessions.get(id)?.buffer.some((e) => e.t === 'result') && hub.sessions.get(id).snap.status === 'idle', 'lượt đầu xong');
+  const csid = hub.sessions.get(id).snap.claudeSessionId;
+  const held = () => [...hub.sessions.values()].filter((r) => r.snap.claudeSessionId === csid);
+  const reopen = (body = {}) => call('/api/machines/mA/open', { claudeSessionId: csid, cwd: WORK, name: 'Mở lại', ...body });
+
+  // Đang chạy: "Tiếp tục" mở chính nó.
+  const again = await reopen();
+  assert.equal(again.status, 200, JSON.stringify(again.data));
+  assert.equal(again.data.id, id);
+  assert.equal(held().length, 1, 'không thêm bản ghi');
+
+  // Đã dừng: "Tiếp tục" chạy lại chính nó.
+  await call(`/api/sessions/${id}/close`, {});
+  await waitFor(() => hub.sessions.get(id).snap.status === 'stopped', 'phiên dừng');
+  const resumed = await reopen();
+  assert.equal(resumed.status, 200, JSON.stringify(resumed.data));
+  assert.equal(resumed.data.id, id);
+  await waitFor(() => hub.sessions.get(id).snap.status === 'idle', 'chạy lại đúng bản ghi cũ');
+  assert.equal(held().length, 1);
+
+  // "Tách nhánh" là phiên Claude mới: dựng bản ghi mới.
+  const fork = await reopen({ fork: true, name: 'Nhánh' });
+  assert.equal(fork.status, 200, JSON.stringify(fork.data));
+  assert.notEqual(fork.data.id, id);
+  await waitFor(() => hub.sessions.get(fork.data.id)?.snap.status === 'idle', 'nhánh sẵn sàng');
+
+  // Bản ghi trùng còn sót từ trước (dựng thẳng, như bản cũ của trạm): chạy lại bản đã dừng khi bản kia đang chạy thì từ chối.
+  await call(`/api/sessions/${id}/close`, {});
+  await waitFor(() => hub.sessions.get(id).snap.status === 'stopped', 'phiên dừng');
+  const twin = await hub.createSession('mA', { name: 'Bản trùng', cwd: WORK, resume: true, claudeSessionId: csid });
+  await waitFor(() => hub.sessions.get(twin.id)?.snap.status === 'idle', 'bản trùng chạy');
+  const refused = await call(`/api/sessions/${id}/resume`, {});
+  assert.notEqual(refused.status, 200);
+  assert.match(refused.data.error, /đang chạy ở mục "Bản trùng"/);
+  assert.equal(hub.sessions.get(id).snap.status, 'stopped', 'không có tiến trình thứ hai');
+
+  for (const sid of [id, fork.data.id, twin.id]) {
+    await call(`/api/sessions/${sid}/close`, {});
+    await waitFor(() => ['stopped', 'crashed'].includes(hub.sessions.get(sid).snap.status), `đóng ${hub.sessions.get(sid).snap.name}`);
+    await call(`/api/sessions/${sid}/forget`, {});
+  }
+});
+
 test('yêu cầu duyệt còn treo mà thẻ duyệt đã mất (trạm khởi động lại): trạm dựng lại thẻ, duyệt được, phiên chạy tiếp', async () => {
   const created = await call('/api/sessions', { machineId: 'mA', cwd: WORK, name: 'Treo duyệt', permissionMode: 'manual' });
   assert.equal(created.status, 200, JSON.stringify(created.data));

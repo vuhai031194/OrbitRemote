@@ -872,9 +872,21 @@ export class Hub extends EventEmitter {
     return r.snap;
   }
 
+  // Các bản ghi app giữ cho cùng một phiên Claude trên một máy (trừ `except`): đang chạy trước, rồi mới hoạt động
+  // gần nhất. Hai bản ghi cùng chạy một phiên Claude là hai tiến trình ghi chồng vào một nhật ký, phải tránh.
+  sameClaudeSession(machineId, claudeSessionId, except = null) {
+    if (!claudeSessionId) return [];
+    return [...this.sessions.values()]
+      .filter((x) => x !== except && x.snap.machineId === machineId && x.snap.claudeSessionId === claudeSessionId)
+      .sort((a, b) => (RUNNING.has(b.snap.status) - RUNNING.has(a.snap.status))
+        || String(b.snap.lastActivity || '').localeCompare(String(a.snap.lastActivity || '')));
+  }
+
   async resume(id) {
     const r = this.record(id);
     if (RUNNING.has(r.snap.status)) throw new Error('Phiên vẫn đang chạy.');
+    const twin = this.sameClaudeSession(r.snap.machineId, r.snap.claudeSessionId, r).find((x) => RUNNING.has(x.snap.status));
+    if (twin) throw new Error(`Phiên Claude này đang chạy ở mục "${twin.snap.name}" trong app. Mở mục đó, hoặc đóng nó rồi hãy chạy lại mục này.`);
     if (this.mover.job(id)?.state === 'running') throw new Error('Phiên đang được chuyển sang máy khác: chờ chuyển xong.');
     if (!r.history && r.buffer.length === 0) await this.loadHistory(r);
     const s = r.snap;
@@ -993,6 +1005,15 @@ export class Hub extends EventEmitter {
 
   async openTranscript(machineId, { claudeSessionId, cwd, fork, name, model, effort, permissionMode, remoteControl, groupId, role }) {
     if (!/^[0-9a-f-]{36}$/i.test(String(claudeSessionId || ''))) throw new Error('Mã phiên không hợp lệ.');
+    // "Tiếp tục" một phiên app đã giữ: dùng lại bản ghi đó (đang chạy thì mở nó, đã dừng thì chạy lại nó) chứ không
+    // dựng bản ghi thứ hai cho cùng phiên Claude. "Tách nhánh" là phiên Claude mới nên vẫn dựng bản ghi mới.
+    const held = fork ? null : this.sameClaudeSession(machineId, claudeSessionId)[0];
+    if (held) {
+      const gid = groupId ? this.groups.ensureRoom(groupId).id : '';
+      const snap = RUNNING.has(held.snap.status) ? held.snap : await this.resume(held.snap.id);
+      if (gid) await this.groups.addMember(gid, snap.id, cleanRole(role));
+      return snap;
+    }
     const { events } = await this.machineRpc(machineId).request({ op: 'history', claudeSessionId, max: 400 });
     return this.createSession(machineId, {
       name: name || 'Phiên mở lại', cwd, resume: true, fork: Boolean(fork), claudeSessionId,
