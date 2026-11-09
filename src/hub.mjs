@@ -33,6 +33,7 @@ const MENTIONS_MAX = 20; // số phiên được tag tối đa trong một tin
 const DELTA_FLUSH_MS = 60; // gộp từng mẩu chữ đang chảy để không bắn một gói cho mỗi token
 const SAVE_DELAY_MS = 1500;
 const SAVE_RETRY_MS = 5000;
+const SEEN_EIDS_MAX = 5000;
 const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
 
 // So đường dẫn tệp app xin với lời của phiên (readSessionFile): bỏ khác biệt \ và /, hoa thường, và mã %XX của
@@ -284,6 +285,8 @@ export class Hub extends EventEmitter {
       power: powerFromMachine(power),
       firstSeen: old?.firstSeen || now,
       lastSeen: now,
+      // Giữ qua các lần nối lại: tin gửi bù ngay sau lời chào có thể trùng tin đã tới trước lúc đứt (seenEvent).
+      seenEids: old?.seenEids,
     };
     this.machines.set(info.id, machine);
     // Bảng bản model mới nhất trạm đang giữ: máy vừa nối (kể cả máy tắt lúc chủ dự án bấm cập nhật) nhận ngay, không
@@ -308,12 +311,23 @@ export class Hub extends EventEmitter {
     return machine;
   }
 
+  // Mã sự kiện đã nhận gần đây của một máy (chỉ trong bộ nhớ, đủ để bắt các lần gửi bù sau một lần đứt nối).
+  seenEvent(machine, eid) {
+    const seen = (machine.seenEids ||= new Set());
+    if (seen.has(eid)) return true;
+    seen.add(eid);
+    if (seen.size > SEEN_EIDS_MAX) seen.delete(seen.values().next().value);
+    return false;
+  }
+
   onMachineMessage(machine, message, link) {
     switch (message.op) {
       case 'status':
         this.upsertSession(machine, message.session);
         return;
       case 'event':
+        // Máy gửi bù sau khi mất nối (node-agent.mjs keepForLater): lô có thể đã tới mà mất câu trả lời, bỏ bản trùng.
+        if (message.eid && this.seenEvent(machine, String(message.eid))) return;
         this.appendEvent(message.id, message.ev);
         return;
       case 'delta':

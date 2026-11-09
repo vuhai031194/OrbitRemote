@@ -38,6 +38,7 @@ const EXTERNAL_SCAN_MS = 20000;
 // Máy không có sổ phiên của Claude Code (bản cũ): nhật ký ghi gần hơn mốc này thì coi là đang mở.
 const EXTERNAL_WINDOW_MS = 15 * 60 * 1000;
 const EXTERNAL_MAX = 20;
+const PENDING_MAX = 2000; // sự kiện giữ lại lúc mất nối trạm (keepForLater)
 const POWER_STALE_MS = 60 * 1000; // lịch tắt quá giờ một phút mà máy vẫn chạy: đã bị huỷ trên máy
 const TOKEN_PUSH_MS = 5 * 60 * 1000; // máy tự báo số token Claude Code của tuần lên trạm (khi số đổi)
 const WEEK_MS = 7 * 24 * 3600 * 1000;
@@ -128,6 +129,11 @@ export class NodeAgent {
     this.onShutdown = options.onShutdown || null; // đầu máy đứng riêng tắt theo yêu cầu của bộ cài
     this.sessions = new Map();
     this.out = null;
+    // Sự kiện của phiên chưa chắc tới trạm (lúc mất nối, hay lô gửi hỏng): gửi bù ngay sau lời chào lần nối sau.
+    // Mỗi sự kiện mang mã eid riêng để trạm bỏ bản trùng khi lô thật ra đã tới mà mất câu trả lời.
+    this.pending = [];
+    this.eidPrefix = randomBytes(4).toString('hex');
+    this.eidCount = 0;
     this.rpc = new Rpc((m) => this.emitOut(m));
     this.pipeServer = null;
     this.scanTimer = null;
@@ -204,9 +210,26 @@ export class NodeAgent {
       wake: localWakeInfo(),
       power: this.powerReport(),
     });
+    // Sau lời chào (trạm đã biết các phiên): gửi bù sự kiện bị lỡ, đúng thứ tự.
+    for (const m of this.pending.splice(0)) send(m);
     this.scanExternal(true);
     this.lastTokens = '';
     this.pushTokens(); // trạm vừa nối (hay vừa khởi động lại) có ngay số của máy, không đợi lượt 5 phút
+  }
+
+  // Giữ sự kiện của phiên để gửi bù (front: tin cũ hơn mọi tin đang giữ). Chỉ giữ "event": trạng thái phiên đã có
+  // trong lời chào, mẩu chữ đang chảy (delta) thì sự kiện chữ trọn vẹn sau đó thay được. Có giới hạn: mất nối lâu
+  // thì bỏ tin cũ nhất, phần đó xem lại được từ nhật ký Claude Code.
+  keepForLater(messages, front = false) {
+    const events = messages.filter((m) => m?.op === 'event');
+    if (!events.length) return;
+    this.pending = front ? [...events, ...this.pending] : [...this.pending, ...events];
+    if (this.pending.length > PENDING_MAX) this.pending.splice(0, this.pending.length - PENDING_MAX);
+  }
+
+  // Đường nối vừa đứt trả lại các tin chưa chắc tới trạm (remote-link.mjs); chúng cũ hơn mọi tin giữ sau đó.
+  requeue(messages) {
+    this.keepForLater(messages, true);
   }
 
   // ---- Token Claude Code của máy này trong tuần usage (claude-tokens.mjs) -------------
@@ -398,6 +421,7 @@ export class NodeAgent {
 
   safeOut(message) {
     if (this.out) this.out(message);
+    else this.keepForLater([message]);
   }
 
   // ---- Lệnh từ trạm ----------------------------------------------------------
@@ -565,7 +589,7 @@ export class NodeAgent {
     session.appendSystemPrompt = systemPromptFor(session, this.machine.name, spec.movedFrom, spec.remote);
     this.sessions.set(id, session);
 
-    session.on('event', (ev) => this.safeOut({ op: 'event', id, ev }));
+    session.on('event', (ev) => this.safeOut({ op: 'event', id, ev, eid: `${this.eidPrefix}-${++this.eidCount}` }));
     session.on('delta', (text) => this.safeOut({ op: 'delta', id, text }));
     session.on('status', (snap) => this.safeOut({ op: 'status', session: snap }));
     session.on('exit', () => {
