@@ -223,3 +223,14 @@ test('phiên cũ gom theo dự án (d:\\X và D:\\X là một), gập sẵn, có
     reply = null;
   }
 });
+
+test('gom theo dự án: hai thư mục khác nhau mà trùng tên thì kèm thư mục cha; trùng chỉ khác hoa thường thì là một', async () => {
+  const { groupByProject } = await import('../web/lib/transcripts.js');
+  const t = (cwd) => ({ claudeSessionId: cwd, cwd, title: cwd, modified: '2026-11-09T10:00:00Z' });
+  const groups = groupByProject([t('D:\\Projects\\app'), t('d:\\Zitga\\app'), t('D:\\Zitga\\app\\'), t('D:\\Zitga\\web')]);
+  assert.deepEqual(groups.map((g) => [g.name, g.where, g.items.length]), [
+    ['app', 'D:\\Projects', 1],
+    ['app', 'd:\\Zitga', 2],
+    ['web', '', 1],
+  ]);
+});

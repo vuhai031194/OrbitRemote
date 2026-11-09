@@ -1459,6 +1459,7 @@ button.proj-head:hover { background: var(--bg-input); }
 .proj-chev { transition: transform 0.25s var(--spring); }
 .proj.open .proj-chev { transform: rotate(90deg); }
 .proj-name { flex: 1; min-width: 0; font-weight: 640; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj-where { font-weight: 400; color: var(--text-dim); } /* thư mục cha, chỉ khi hai dự án trùng tên */
 .proj-time { flex: none; color: var(--text-dim); font-size: 0.86em; }
 .proj-body { display: none; }
 .proj.open > .proj-body { display: block; }

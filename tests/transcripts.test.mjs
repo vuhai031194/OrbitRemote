@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -104,4 +104,48 @@ test('thùng rác: dời nhật ký và thư mục đi kèm sang thư mục tr�
   // id(4) đang mở theo sổ phiên của Claude Code (ghi ở phép kiểm đầu).
   assert.throws(() => transcriptAction(id(4), 'trash'), /đang mở ở VS Code hay terminal/);
   assert.ok(existsSync(join(dir, `${id(4)}.jsonl`)));
+});
+
+test('thư mục làm việc theo thư mục chứa nhật ký: dự án bị dời thì về chỗ mới, cd vào thư mục con thì vẫn là dự án gốc', () => {
+  // File nhỏ: đọc trọn.
+  write('D--Zitga-moved', 30, [
+    { type: 'user', cwd: 'D:\\Projects\\moved', message: { role: 'user', content: 'dựng dữ liệu' } },
+    { type: 'user', cwd: 'D:\\Zitga\\moved', message: { role: 'user', content: 'chạy tiếp ở chỗ mới' } },
+  ]);
+  // File lớn hơn phần đầu (96 KB): thư mục mới chỉ nằm ở phần đuôi.
+  const filler = { type: 'assistant', cwd: 'D:\\Projects\\big', message: { role: 'assistant', content: [{ type: 'text', text: 'y'.repeat(2000) }] } };
+  write('D--Zitga-big', 31, [
+    { type: 'user', cwd: 'D:\\Projects\\big', message: { role: 'user', content: 'phiên dài' } },
+    ...Array.from({ length: 80 }, () => filler),
+    { type: 'user', cwd: 'D:\\Zitga\\big', message: { role: 'user', content: 'chạy tiếp' } },
+  ]);
+  // `cd` vào thư mục con trong phiên: vẫn thuộc dự án gốc (thư mục chứa nhật ký mang tên dự án gốc).
+  write('d--Zitga-PigLoop', 32, [
+    { type: 'user', cwd: 'D:\\Zitga\\PigLoop', message: { role: 'user', content: 'sửa CartSort' } },
+    { type: 'assistant', cwd: 'D:\\Zitga\\PigLoop\\CartSort\\Assets', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } },
+  ]);
+  // Tên thư mục không khớp bản nào (Claude Code rút gọn tên dài chẳng hạn): lấy bản đầu như trước.
+  write('D--Zitga-short-1a2b3c', 33, [
+    { type: 'user', cwd: 'D:\\Zitga\\a-very-long-name', message: { role: 'user', content: 'x' } },
+    { type: 'user', cwd: 'D:\\Zitga\\a-very-long-name\\sub', message: { role: 'user', content: 'y' } },
+  ]);
+  const byId = new Map(listTranscripts(100).map((t) => [t.claudeSessionId, t]));
+  assert.equal(byId.get(id(30)).cwd, 'D:\\Zitga\\moved');
+  assert.equal(byId.get(id(30)).prompt, 'dựng dữ liệu', 'câu hỏi vẫn là câu đầu');
+  assert.equal(byId.get(id(31)).cwd, 'D:\\Zitga\\big');
+  assert.equal(byId.get(id(32)).cwd, 'D:\\Zitga\\PigLoop', 'cd vào thư mục con không đổi dự án; tên thư mục khác hoa thường vẫn khớp');
+  assert.equal(byId.get(id(33)).cwd, 'D:\\Zitga\\a-very-long-name');
+});
+
+test('thư mục nhật ký bị đổi tên tay theo chỗ mới mà các dòng vẫn ghi chỗ cũ đã mất: tìm thư mục thật theo tên thư mục nhật ký', () => {
+  // Đường dẫn dài thật (không phải dạng 8.3) để tên thư mục nhật ký khớp tên trên đĩa.
+  const real = join(realpathSync.native(ROOT), 'Zitga', 'vh-library');
+  mkdirSync(real, { recursive: true });
+  const gone = join(realpathSync.native(ROOT), 'Projects', 'vh-library'); // chỗ cũ, không còn
+  write(real.replace(/[^a-zA-Z0-9]/g, '-'), 40, [{ type: 'user', cwd: gone, message: { role: 'user', content: 'project này làm gì?' } }]);
+  // Chỗ cũ không còn mà cũng không tìm ra chỗ mới: giữ chỗ cũ như trước.
+  write('D--Nowhere-at-all-zz9', 41, [{ type: 'user', cwd: 'D:\\Nowhere\\at-all', message: { role: 'user', content: 'x' } }]);
+  const byId = new Map(listTranscripts(100).map((t) => [t.claudeSessionId, t]));
+  assert.equal(byId.get(id(40)).cwd.toLowerCase(), real.toLowerCase());
+  assert.equal(byId.get(id(41)).cwd, 'D:\\Nowhere\\at-all');
 });

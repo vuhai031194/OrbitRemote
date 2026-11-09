@@ -35,15 +35,22 @@ export async function transcriptAction(machineId, claudeSessionId, action) {
 
 // Gom theo thư mục làm việc. Trên Windows nhật ký ghi lẫn "d:\X" và "D:\X", nên so không phân biệt hoa thường.
 // Giữ thứ tự của danh sách vào (mới trước): dự án có phiên gần nhất đứng đầu.
+// Hai thư mục khác nhau mà trùng tên (D:\A\app và E:\B\app) thì kèm thư mục cha (`where`) để phân biệt.
 export function groupByProject(list) {
   const groups = new Map();
   for (const t of list) {
     const key = String(t.cwd || '').replace(/[\\/]+$/, '').toLowerCase();
     let g = groups.get(key);
-    if (!g) groups.set(key, (g = { key, cwd: t.cwd || '', name: baseName(t.cwd) || 'Không rõ thư mục', items: [] }));
+    if (!g) groups.set(key, (g = { key, cwd: t.cwd || '', name: baseName(t.cwd) || 'Không rõ thư mục', where: '', items: [] }));
     g.items.push(t);
   }
-  return [...groups.values()];
+  const all = [...groups.values()];
+  const named = new Map();
+  for (const g of all) named.set(g.name.toLowerCase(), (named.get(g.name.toLowerCase()) || 0) + 1);
+  for (const g of all) {
+    if (named.get(g.name.toLowerCase()) > 1) g.where = g.cwd.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '');
+  }
+  return all;
 }
 
 // Một khối dự án: dòng đầu (tên thư mục, số phiên, lần ghi gần nhất) chạm để mở hay gập, bên dưới là các
@@ -67,7 +74,7 @@ export function projectBlock(g, rowOf, { alwaysOpen = false } = {}) {
   },
   alwaysOpen ? null : icon('chevron', 14, 'proj-chev'),
   icon('folder', 15),
-  h('span', { class: 'proj-name' }, g.name),
+  h('span', { class: 'proj-name' }, g.name, g.where ? h('span', { class: 'proj-where' }, ` · ${g.where}`) : null),
   h('span', { class: 'group-count' }, String(g.items.length)),
   h('span', { class: 'proj-time' }, timeAgo(g.items[0]?.modified)));
   add(block, head, h('div', { class: 'proj-body' }, g.items.map(rowOf)));

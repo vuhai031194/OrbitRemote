@@ -97,30 +97,87 @@ function allFiles() {
   return files;
 }
 
+// Tên thư mục Claude Code đặt cho một dự án trong ~/.claude/projects: mọi ký tự không phải chữ hay số thành
+// "-" (D:\Zitga\pigloop-ai-data -> D--Zitga-pigloop-ai-data). So không phân biệt hoa thường: trên Windows
+// thư mục mang tên theo lần tạo đầu, "d--Zitga-x" hay "D--Zitga-x".
+const projectKey = (cwd) => String(cwd).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+
+// Tìm trên đĩa thư mục thật có tên dự án khớp `dirKey` (dạng projectKey). Tên đã mất dấu phân cách nên không
+// giải ngược được; thay vào đó đi từ gốc ổ xuống, mỗi tầng chỉ vào thư mục con có tên khớp phần đầu còn lại
+// ("d--zitga-vh-library": ổ D:, rồi "Zitga", rồi "vh-library"). Ít khi cần (xem describe), và mỗi dự án chỉ
+// tìm một lần mỗi lần chạy, kể cả khi không thấy.
+const resolvedDirs = new Map(); // dirKey -> đường dẫn thật, '' nếu không thấy
+function findProjectDir(dirKey) {
+  if (resolvedDirs.has(dirKey)) return resolvedDirs.get(dirKey);
+  let found = '';
+  const drive = /^([a-z])--(.+)$/.exec(dirKey); // Windows: "d--zitga-x"
+  if (process.platform === 'win32' && drive) found = walkProjectDir(`${drive[1].toUpperCase()}:\\`, drive[2], 0);
+  else if (process.platform !== 'win32' && dirKey.startsWith('-')) found = walkProjectDir('/', dirKey.slice(1), 0); // "/Users/x" -> "-users-x"
+  resolvedDirs.set(dirKey, found);
+  return found;
+}
+function walkProjectDir(dir, rest, depth) {
+  if (depth > 12) return '';
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return '';
+  }
+  for (const d of entries) {
+    if (!d.isDirectory()) continue;
+    const k = projectKey(d.name);
+    if (k === rest) return join(dir, d.name);
+    if (k && rest.startsWith(`${k}-`)) {
+      const r = walkProjectDir(join(dir, d.name), rest.slice(k.length + 1), depth + 1);
+      if (r) return r;
+    }
+  }
+  return '';
+}
+
+// Thư mục làm việc của phiên. Mỗi dòng nhật ký ghi thư mục lúc đó, và nó đổi trong đời phiên theo hai cách:
+//   - lệnh `cd` vào thư mục con (D:\Zitga\PigLoop rồi ...\PigLoop\CartSort): phiên vẫn thuộc dự án gốc;
+//   - dự án bị dời rồi phiên chạy tiếp ở chỗ mới (D:\Projects\x rồi D:\Zitga\x): phiên thuộc chỗ mới, chỗ cũ
+//     có khi không còn.
+// Thư mục chứa file nhật ký cho biết phiên đang thuộc dự án nào, nên lấy bản ghi sau cùng khớp tên thư mục đó.
+// Không bản nào khớp thì lấy bản đầu như trước; riêng khi bản đó không còn trên đĩa (thư mục nhật ký bị đổi tên
+// tay theo chỗ mới của dự án, mà các dòng bên trong vẫn ghi chỗ cũ) thì tìm thư mục thật theo tên thư mục nhật ký.
 function describe({ file, mtime, size }) {
   let c = cache.get(file);
   if (c && c.mtime === mtime) return c;
+  const dirKey = basename(dirname(file)).toLowerCase();
+  const matches = (cwd) => projectKey(cwd) === dirKey;
   // File nhỏ thì đọc lại trọn (rẻ) để bắt tiêu đề mới; file lớn chỉ đọc đầu một lần.
   if (!c?.head || size <= HEAD_BYTES) {
     const head = parseLines(readSlice(file, 0, Math.min(size, HEAD_BYTES)));
-    let cwd = '';
+    let firstCwd = '';
+    let matchCwd = '';
     let prompt = '';
     let title = '';
     for (const e of head) {
-      if (!cwd && e.cwd) cwd = e.cwd;
+      if (e.cwd) {
+        if (!firstCwd) firstCwd = e.cwd;
+        if (matches(e.cwd)) matchCwd = e.cwd;
+      }
       if (!prompt) prompt = firstUserText(e);
       if (e.type === 'ai-title' && e.aiTitle) title = e.aiTitle;
     }
-    c = { head: { cwd, prompt: prompt.slice(0, PROMPT_MAX) }, title };
+    c = { head: { firstCwd, matchCwd, prompt: prompt.slice(0, PROMPT_MAX) }, title };
   }
-  // Tiêu đề do AI đặt được ghi lại nhiều lần trong đời phiên: lấy bản mới nhất ở đuôi file.
+  // Tiêu đề do AI đặt và thư mục làm việc đổi được trong đời phiên: lấy bản mới nhất ở đuôi file.
+  let tailMatch = '';
+  let tailFirst = '';
   if (size > HEAD_BYTES) {
     for (const e of parseLines(readSlice(file, Math.max(0, size - TAIL_BYTES), TAIL_BYTES))) {
       if (e.type === 'ai-title' && e.aiTitle) c.title = e.aiTitle;
-      if (!c.head.cwd && e.cwd) c.head.cwd = e.cwd;
+      if (e.cwd && !tailFirst) tailFirst = e.cwd;
+      if (e.cwd && matches(e.cwd)) tailMatch = e.cwd;
     }
   }
-  c = { ...c, mtime, size };
+  let cwd = tailMatch || c.head.matchCwd || c.head.firstCwd || tailFirst;
+  if (!tailMatch && !c.head.matchCwd && !(cwd && existsSync(cwd))) cwd = findProjectDir(dirKey) || cwd;
+  c = { ...c, head: { ...c.head, cwd }, mtime, size };
   cache.set(file, c);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
   return c;
