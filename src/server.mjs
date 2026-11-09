@@ -15,6 +15,8 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, relative, sep } from 'node:path';
 import { CUSTOM_DIR, WEB_DIR, writeJsonAtomic } from './paths.mjs';
 import { NONCE } from './hub-identity.mjs';
+import { hostAllowed, hostNamesOf } from './netaddr.mjs';
+import { hostname as osHostname } from 'node:os';
 
 // Dấu của bản giao diện trạm đang phát: băm nội dung mọi file trong web/ lúc trạm khởi động. Số phiên bản trong
 // package.json ít khi đổi, còn dấu này đổi theo đúng từng lần sửa giao diện.
@@ -181,6 +183,17 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
   // Nguồn trang app được phép gọi thêm: cổng màn hình của các máy (điện thoại nối thẳng tới máy bằng
   // WebSocket khi xem màn hình).
   const pageConnect = () => hub.screenSources().filter(Boolean).join(' ');
+  // Tên được dùng làm Host khi gọi tới trạm (ngoài IP trần và localhost): các địa chỉ trạm tự khai (mạng nhà,
+  // Tailscale), tên máy, và tên người dùng thêm qua ORBIT_REMOTE_ALLOWED_HOSTS (danh sách cách nhau bằng dấu phẩy).
+  const allowedHostNames = () => {
+    const info = hubInfo() || {};
+    const names = hostNamesOf([...(info.urls || []), ...(info.tailnet?.urls || [])]);
+    const me = osHostname().toLowerCase();
+    for (const n of [me, `${me}.local`, `${me}.lan`, `${me}.home`]) names.add(n);
+    for (const n of String(process.env.ORBIT_REMOTE_ALLOWED_HOSTS || '').split(',')) if (n.trim()) names.add(n.trim().toLowerCase());
+    return names;
+  };
+
   // Yêu cầu nối đang chờ, kèm tên máy đã biết nếu bên xin dùng mã của một máy cũ (thẻ trên app nói rõ đó là máy nào).
   const enrollments = () => auth.pendingEnrollments().map((e) => {
     const known = hub.machines.get(e.machineId);
@@ -559,6 +572,8 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
   }
 
   async function route(req, res) {
+    // DNS rebinding (netaddr.mjs hostAllowed): yêu cầu mang Host là một tên miền lạ thì không phải của app.
+    if (!hostAllowed(req.headers.host, allowedHostNames())) throw new HttpError(421, 'Địa chỉ này không phải của trạm Orbit Remote.');
     const url = new URL(req.url, 'http://local');
     const path = url.pathname;
 

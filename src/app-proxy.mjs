@@ -12,6 +12,7 @@
 
 import http from 'node:http';
 import https from 'node:https';
+import { hostAllowed } from './netaddr.mjs';
 
 export const APP_PORT = Number(process.env.ORBIT_REMOTE_APP_PORT) || 8797;
 // Cổng bận thì thử nghe lại sau 1 giây, 2 giây... rồi đều đặn mỗi 5 giây.
@@ -34,6 +35,20 @@ function forwardHeaders(headers) {
 // chuyển tới trạm.
 export function startAppProxy({ target, port = APP_PORT, host = '127.0.0.1', log = () => {}, local = null }) {
   const server = http.createServer((req, res) => {
+    // Cổng này chỉ nghe 127.0.0.1: Host khác loopback là trang lạ trỏ tên miền về đây (DNS rebinding).
+    if (!hostAllowed(req.headers.host, undefined, { loopbackOnly: true })) {
+      res.writeHead(421, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Địa chỉ này không phải của Orbit Remote.');
+      return;
+    }
+    // Cửa sổ app không cần xin nối hay nói thay một máy; mở hai đường này qua cổng loopback chỉ là để trang lạ
+    // lợi dụng (yêu cầu nối đi ra từ đúng IP của một máy quen trên thẻ duyệt).
+    const askedPath = String(req.url).split('?')[0];
+    if (askedPath === '/api/enroll' || askedPath.startsWith('/api/enroll/') || askedPath.startsWith('/node/')) {
+      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Không mở đường này qua cổng app.');
+      return;
+    }
     if (req.url.startsWith('/local/clip/')) {
       if (local) {
         local(req, res);

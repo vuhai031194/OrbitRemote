@@ -5,7 +5,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import http from 'node:http';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.ORBIT_REMOTE_STATE = mkdtempSync(join(tmpdir(), 'orbit-pc-app-test-'));
@@ -161,4 +162,45 @@ test('biểu tượng và tệp mở app: .ico đúng cấu trúc chứa nguyên
   const vbs = launcherScript('C:\\Program Files\\nodejs\\node.exe', 'C:\\Orbit\\Tools\\Orbit Remote\\src\\main.mjs');
   assert.match(vbs, /^[\x20-\x7e\r\n]*$/);
   assert.ok(vbs.includes('Run """C:\\Program Files\\nodejs\\node.exe"" ""C:\\Orbit\\Tools\\Orbit Remote\\src\\main.mjs"" app", 0, False'));
+});
+
+// Gửi một yêu cầu với Host tự chọn (fetch không cho đặt Host).
+function rawGet(port, path, host) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path, method: 'GET', headers: { Host: host } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('chống DNS rebinding: trạm chỉ nhận Host là IP, localhost hay tên của chính trạm; cổng app chỉ nhận loopback và không mở đường xin nối', async () => {
+  target = `http://127.0.0.1:${hubPort}`;
+  assert.equal(await rawGet(hubPort, '/api/ping', `127.0.0.1:${hubPort}`), 200);
+  assert.equal(await rawGet(hubPort, '/api/ping', `localhost:${hubPort}`), 200);
+  assert.equal(await rawGet(hubPort, '/api/ping', `192.168.1.20:${hubPort}`), 200, 'IP trần (mạng nhà, Tailscale) thì được');
+  assert.equal(await rawGet(hubPort, '/api/ping', `[::1]:${hubPort}`), 200);
+  assert.equal(await rawGet(hubPort, '/api/ping', `${hostname()}:${hubPort}`), 200, 'tên máy của trạm');
+  assert.equal(await rawGet(hubPort, '/api/ping', `evil.example:${hubPort}`), 421, 'tên miền lạ trỏ về trạm');
+  assert.equal(await rawGet(hubPort, '/', 'attacker.test'), 421);
+
+  assert.equal(await rawGet(proxyPort, '/api/ping', `127.0.0.1:${proxyPort}`), 200);
+  assert.equal(await rawGet(proxyPort, '/api/ping', `localhost:${proxyPort}`), 200);
+  assert.equal(await rawGet(proxyPort, '/api/ping', `evil.example:${proxyPort}`), 421);
+  assert.equal(await rawGet(proxyPort, '/api/ping', `192.168.1.20:${proxyPort}`), 421, 'cổng app chỉ nghe loopback: Host khác loopback là lạ');
+  for (const p of ['/api/enroll', '/api/enroll/0123456789abcdef', '/node/link']) {
+    assert.equal(await rawGet(proxyPort, p, `127.0.0.1:${proxyPort}`), 403, p);
+  }
+});
+
+test('hostAllowed: tên có trong danh sách của trạm thì được, kể cả có dấu chấm cuối; chỉ-loopback thì từ chối IP khác', async () => {
+  const { hostAllowed, hostNamesOf } = await import('../src/netaddr.mjs');
+  const names = hostNamesOf(['http://cty.tail5051dc.ts.net:8795', 'http://100.102.248.85:8795', 'rác']);
+  assert.ok(hostAllowed('cty.tail5051dc.ts.net:8795', names));
+  assert.ok(hostAllowed('CTY.tail5051dc.ts.net.:8795', names));
+  assert.ok(!hostAllowed('other.tail5051dc.ts.net:8795', names));
+  assert.ok(hostAllowed('', names), 'không có Host: không phải trình duyệt');
+  assert.ok(!hostAllowed('10.0.0.5:8797', names, { loopbackOnly: true }));
 });
