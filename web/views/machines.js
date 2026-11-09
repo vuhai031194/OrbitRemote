@@ -9,7 +9,8 @@ import { icon } from '../lib/icons.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { createRenderer } from '../lib/render.js';
-import { openSheet, openNewSession } from './sheets.js';
+import { openSheet, openNewSession, openTranscriptBin } from './sheets.js';
+import { ACTION_DONE, groupByProject, onTranscriptsChange, pastCache, projectBlock, transcriptAction } from '../lib/transcripts.js';
 import { NEW_SESSION_DEFAULTS } from '../lib/custom.js';
 import { STATUS_LABEL } from './home.js';
 import { claudeAccountBlock } from './claude-login.js';
@@ -19,9 +20,6 @@ import { mountSession } from './session.js';
 const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
 const WATCH_MS = 8000; // nhịp xem lại nhật ký của phiên ngoài app khi màn đang mở
 const PAST_TTL_MS = 20000; // mở lại danh sách phiên trong chừng này thì dùng lại danh sách phiên cũ vừa đọc
-// Phiên cũ trên máy (nhật ký Claude Code) đã đọc gần nhất của mỗi máy, để màn xem chỉ-đọc biết tên và
-// thao tác được với phiên vừa chọn trong danh sách.
-const pastCache = new Map(); // mã máy -> [{ claudeSessionId, title, cwd, modified, sizeKb, maybeActive }]
 
 const PLATFORM = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' };
 // Setup báo kết quả sau mỗi bước; bước dài nhất (chờ duyệt, cài bằng winget) dưới 15 phút.
@@ -78,7 +76,20 @@ export function enrollmentCards() {
 
 // ---- Thao tác với một phiên ngoài app -----------------------------------------------------
 export function openExternalSheet(machineId, t) {
-  const { body, close } = openSheet('Phiên ngoài app');
+  const { body, close } = openSheet(t.past ? 'Phiên cũ trên máy' : 'Phiên ngoài app');
+  // Phiên đã đóng: dọn khỏi danh sách theo một trong hai cách, cả hai đều lấy lại được (src/transcripts.mjs).
+  const tidy = async (action, btn) => {
+    btn.disabled = true;
+    try {
+      await transcriptAction(machineId, t.claudeSessionId, action);
+      close();
+      toast(ACTION_DONE[action]);
+      if (location.hash.startsWith(`#/x/${machineId}/${t.claudeSessionId}`)) location.hash = `#/m/${machineId}`;
+    } catch (err) {
+      btn.disabled = false;
+      toast(err.message, 'error');
+    }
+  };
   const open = async (fork) => {
     try {
       const snap = await api.post(`/api/machines/${machineId}/open`, {
@@ -98,7 +109,15 @@ export function openExternalSheet(machineId, t) {
     h('div', { class: 'danger-row' },
       h('button', { class: 'btn block', onclick: () => { close(); location.hash = `#/x/${machineId}/${t.claudeSessionId}`; } }, icon('history', 16), 'Xem hội thoại'),
       h('button', { class: `btn block${t.active ? '' : ' primary'}`, onclick: () => open(false) }, icon('play', 16), 'Tiếp tục ở app'),
-      h('button', { class: `btn block${t.active ? ' primary' : ' ghost'}`, onclick: () => open(true) }, icon('link', 16), 'Tách nhánh mới ở app')));
+      h('button', { class: `btn block${t.active ? ' primary' : ' ghost'}`, onclick: () => open(true) }, icon('link', 16), 'Tách nhánh mới ở app')),
+    t.past ? h('div', { class: 'tidy' },
+      h('div', { class: 'field-label' }, 'Dọn khỏi danh sách'),
+      h('div', { class: 'tidy-row' },
+        h('button', { class: 'btn block', type: 'button', onclick: (e) => tidy('hide', e.currentTarget) }, icon('eyeoff', 16), 'Ẩn khỏi danh sách'),
+        h('button', { class: 'btn block danger-outline', type: 'button', onclick: (e) => tidy('trash', e.currentTarget) }, icon('trash', 16), 'Chuyển vào thùng rác')),
+      h('div', { class: 'field-hint' }, 'Ẩn: nhật ký giữ nguyên trên máy, chỉ thôi hiện trong danh sách phiên cũ. '
+        + 'Thùng rác: dời nhật ký sang thùng rác của Orbit Remote, dọn được ổ đĩa; Claude Code không mở lại được phiên này cho tới khi khôi phục. '
+        + 'Cả hai đều lấy lại được ở mục "Đã ẩn" và "Thùng rác" cuối danh sách phiên cũ.')) : null);
 }
 
 // ---- Phiên ở máy khác làm việc trên máy này (orbit_machine_*, src/remote-ops.mjs) ---------------------------------
@@ -221,11 +240,24 @@ function pastRow(machineId, t) {
     h('span', { class: 'status-dot' }),
     h('span', { class: 'drop-main' },
       h('span', { class: 'drop-name' }, t.title),
-      h('span', { class: 'drop-meta' }, [baseName(t.cwd), sizeLabel(t.sizeKb)].filter(Boolean).join(' · '))),
+      h('span', { class: 'drop-meta' }, sizeLabel(t.sizeKb))), // thư mục đã là tên khối dự án bên trên
     h('span', { class: 'drop-time' }, timeAgo(t.modified)));
 }
+// Dòng phiên cũ kèm nút ⋯: tiếp tục, tách nhánh, ẩn hay chuyển vào thùng rác.
+function pastLine(machineId, t) {
+  return h('div', { class: 'drop-line' }, pastRow(machineId, t),
+    h('button', { class: 'icon-btn drop-float', type: 'button', 'aria-label': 'Thao tác với phiên này', title: 'Tiếp tục, tách nhánh, ẩn, thùng rác',
+      onclick: () => openExternalSheet(machineId, fromPast(t)) }, icon('more', 18)));
+}
+// Hai nút cuối danh sách phiên cũ: xem lại phiên đã ẩn và thùng rác (chỉ hiện khi có).
+function binRow(machineId, past) {
+  if (!past.hiddenCount && !past.trashCount) return null;
+  return h('div', { class: 'drop-bin' },
+    past.hiddenCount ? h('button', { class: 'chip small', type: 'button', onclick: () => openTranscriptBin(machineId, 'hidden') }, icon('eyeoff', 14), `Đã ẩn ${past.hiddenCount}`) : null,
+    past.trashCount ? h('button', { class: 'chip small', type: 'button', onclick: () => openTranscriptBin(machineId, 'trash') }, icon('trash', 14), `Thùng rác ${past.trashCount}`) : null);
+}
 
-// past: phiên cũ đọc từ máy { state: 'idle' | 'loading' | 'ready' | 'error', list, error }.
+// past: phiên cũ đọc từ máy { state: 'idle' | 'loading' | 'ready' | 'error', list, error, hiddenCount, trashCount }.
 function sessionDropContent(m, past, float) {
   const all = sessionsOf(m.id).sort((a, b) => (b.lastActivity || '').localeCompare(a.lastActivity || ''));
   const running = all.filter((s) => RUNNING.has(s.status));
@@ -235,7 +267,9 @@ function sessionDropContent(m, past, float) {
   const shown = new Set([...all.map((s) => s.claudeSessionId), ...outside.map((t) => t.claudeSessionId)].filter(Boolean));
   const older = past.list.filter((t) => !shown.has(t.claudeSessionId));
   const note = (text) => h('div', { class: 'drop-note' }, text);
-  let pastRows = older.map((t) => pastRow(m.id, t));
+  // Gom theo dự án (thư mục làm việc); chỉ một dự án thì khối đó luôn mở.
+  const projects = groupByProject(older);
+  let pastRows = projects.map((g) => projectBlock(g, (t) => pastLine(m.id, t), { alwaysOpen: projects.length === 1 }));
   if (!m.online && !older.length) pastRows = [];
   else if (past.state === 'loading' && !older.length) pastRows = [note('Đang đọc các phiên Claude trên máy…')];
   else if (past.state === 'error') pastRows = [...pastRows, note(`Không đọc được phiên cũ trên máy: ${past.error}`)];
@@ -252,6 +286,7 @@ function sessionDropContent(m, past, float) {
     group('Đang mở ngoài app', outside.map((t) => externalRow(m.id, t))),
     group('Đã dừng', stopped.map((s) => sessionRow(s, float))),
     group('Phiên cũ trên máy', pastRows, older.length),
+    m.online ? binRow(m.id, past) : null,
   ].filter(Boolean);
   if (!body.length) return [h('div', { class: 'drop-empty' }, m.online ? 'Máy này chưa có phiên nào. Bấm "Mở phiên" để bắt đầu.' : 'Máy đang tắt, chưa có phiên nào.')];
   return [...body, closeAll];
@@ -615,9 +650,9 @@ export function mountMachine(root, id, { fromSession = '', fromGroup = '' } = {}
     past = { ...past, state: 'loading' };
     renderDrop();
     try {
-      const { transcripts } = await api.get(`/api/machines/${id}/transcripts`);
+      const { transcripts, hiddenCount = 0, trashCount = 0 } = await api.get(`/api/machines/${id}/transcripts`);
       if (turn !== pastDone) return;
-      past = { state: 'ready', list: transcripts || [], error: '', at: Date.now() };
+      past = { state: 'ready', list: transcripts || [], error: '', at: Date.now(), hiddenCount, trashCount };
       pastCache.set(id, past.list);
     } catch (err) {
       if (turn !== pastDone) return;
@@ -625,6 +660,17 @@ export function mountMachine(root, id, { fromSession = '', fromGroup = '' } = {}
     }
     renderDrop();
   }
+  // Vừa ẩn, chuyển vào thùng rác hay khôi phục một phiên của máy này (ở đây hay ở bảng khác): bỏ ngay dòng đó
+  // khỏi danh sách đang hiện rồi hỏi máy lại cho đúng số đếm.
+  const offTranscripts = onTranscriptsChange((machineId) => {
+    if (machineId !== id) return;
+    pastDone += 1; // lần đọc đang dở (nếu có) trả về danh sách cũ: bỏ
+    past = { ...past, state: past.state === 'loading' ? 'ready' : past.state, list: pastCache.get(id) || past.list, at: 0 };
+    if (dropOpen) {
+      renderDrop();
+      loadPast();
+    }
+  });
 
   function renderDrop() {
     const m = store.machines.get(id);
@@ -1031,6 +1077,7 @@ export function mountMachine(root, id, { fromSession = '', fromGroup = '' } = {}
   if (savedFloat && store.sessions.get(savedFloat)?.machineId === id) showFloat(savedFloat);
   return () => {
     offs.forEach((off) => off());
+    offTranscripts();
     clearInterval(tick);
     clearInterval(powerTick);
     endFloatGesture(false);

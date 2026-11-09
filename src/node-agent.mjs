@@ -25,7 +25,7 @@ import { ScreenServer, ffmpegCommand } from './screen.mjs';
 import { InputHelper } from './input.mjs';
 import { controlTimeoutMs, remoteOp } from './remote-ops.mjs';
 import { Sensors } from './sensors.mjs';
-import { findTranscript, listExternalSessions, listTranscripts, loadHistory } from './transcripts.mjs';
+import { findTranscript, listExternalSessions, listTranscripts, listTrash, loadHistory, transcriptAction, transcriptBin } from './transcripts.mjs';
 import { forgetUsage, readClaudeUsage } from './usage.mjs';
 import { ClaudeLogin, authStatus } from './claude-auth.mjs';
 import { TokenCounter, tokenSum } from './claude-tokens.mjs';
@@ -446,8 +446,11 @@ export class NodeAgent {
       case 'dirs':
         return reply(() => listDirs(String(message.path || '').slice(0, 1000))); // duyệt thư mục làm việc (dirs.mjs)
       case 'transcripts':
+        // view: '' danh sách phiên cũ (bỏ phiên đã ẩn), 'hidden' chỉ phiên đã ẩn, 'trash' phiên trong thùng rác.
+        // Kèm số phiên đã ẩn và trong thùng rác (transcriptBin) để app hiện hai nút ở cuối danh sách.
         return reply(() => {
-          const list = listTranscripts(message.limit || 40);
+          if (message.view === 'trash') return { transcripts: listTrash(message.limit || 200), dirs: [], ...transcriptBin() };
+          const list = listTranscripts(message.limit || 40, { hidden: message.view === 'hidden' ? 'only' : 'skip' });
           // Trên Windows "d:\Project" và "D:\Project" là một thư mục; nhật ký ghi lẫn cả hai.
           const seen = new Set();
           const dirs = [];
@@ -457,7 +460,16 @@ export class NodeAgent {
             seen.add(key);
             dirs.push(cwd);
           }
-          return { transcripts: list, dirs };
+          return { transcripts: list, dirs, ...transcriptBin() };
+        });
+      case 'transcript_action':
+        // Ẩn, bỏ ẩn, chuyển vào thùng rác, khôi phục một phiên cũ (transcripts.mjs transcriptAction).
+        return reply(() => {
+          const id = String(message.claudeSessionId || '');
+          if (message.action === 'trash' && [...this.sessions.values()].some((s) => s.claudeSessionId === id)) {
+            fail('Phiên này đang chạy trong app. Đóng phiên trước rồi hãy chuyển vào thùng rác.');
+          }
+          return transcriptAction(id, message.action);
         });
       case 'history':
         return reply(() => loadHistory(message.claudeSessionId, message.max || 400, { sinceMtime: message.sinceMtime || 0 }));

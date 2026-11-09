@@ -384,7 +384,12 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
 
     if (parts[1] === 'machines' && parts[2]) {
       const machineId = parts[2];
-      if (method === 'GET' && parts[3] === 'transcripts') return sendJson(res, 200, await hub.transcripts(machineId));
+      if (method === 'GET' && parts[3] === 'transcripts') return sendJson(res, 200, await hub.transcripts(machineId, url.searchParams.get('view') || ''));
+      // POST /api/machines/<máy>/transcripts/<mã phiên>/hide|unhide|trash|restore
+      if (method === 'POST' && parts[3] === 'transcripts' && parts[4] && parts[5]) {
+        await readBody(req);
+        return sendJson(res, 200, await hub.transcriptAction(machineId, parts[4], parts[5]));
+      }
       if (method === 'GET' && parts[3] === 'dirs') return sendJson(res, 200, await hub.machineDirs(machineId, url.searchParams.get('path') || ''));
       if (method === 'GET' && parts[3] === 'temps') return sendJson(res, 200, await hub.machineTemps(machineId));
       if (method === 'GET' && parts[3] === 'history' && parts[4]) {

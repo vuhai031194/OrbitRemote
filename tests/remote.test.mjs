@@ -722,6 +722,37 @@ test('phiên ngoài app: hiện trên máy, xem được lịch sử, không l�
   assert.equal(again.data.unchanged, true, 'file không đổi thì không gửi lại');
 });
 
+test('phiên cũ qua API: ẩn và bỏ ẩn, chuyển vào thùng rác và khôi phục; phiên còn trong danh sách app thì không cho vào thùng rác', async () => {
+  const { existsSync } = await import('node:fs');
+  const old = '99999999-2222-3333-4444-555555555555'; // nhật ký cũ do phép kiểm trên ghi
+  const file = join(process.env.ORBIT_REMOTE_PROJECTS, 'D--Fake-Project', `${old}.jsonl`);
+  const list = async (view = '') => (await call(`/api/machines/mA/transcripts${view ? `?view=${view}` : ''}`)).data;
+  const ids = async (view) => (await list(view)).transcripts.map((t) => t.claudeSessionId);
+  assert.ok((await ids()).includes(old));
+
+  assert.equal((await call(`/api/machines/mA/transcripts/${old}/hide`, {})).status, 200);
+  assert.ok(!(await ids()).includes(old), 'đã ẩn thì thôi hiện');
+  assert.deepEqual(await ids('hidden'), [old]);
+  assert.equal((await list()).hiddenCount, 1);
+  assert.ok(existsSync(file), 'ẩn không dời file');
+  assert.equal((await call(`/api/machines/mA/transcripts/${old}/unhide`, {})).status, 200);
+  assert.ok((await ids()).includes(old));
+
+  assert.equal((await call(`/api/machines/mA/transcripts/${old}/trash`, {})).status, 200);
+  assert.ok(!existsSync(file), 'nhật ký rời thư mục của Claude Code');
+  assert.deepEqual(await ids('trash'), [old]);
+  assert.equal((await list()).trashCount, 1);
+  assert.equal((await call(`/api/machines/mA/transcripts/${old}/restore`, {})).status, 200);
+  assert.ok(existsSync(file), 'khôi phục về đúng chỗ cũ');
+  assert.deepEqual(await ids('trash'), []);
+
+  const alpha = [...hub.sessions.values()].find((r) => r.snap.name === 'Alpha').snap;
+  const refused = await call(`/api/machines/mA/transcripts/${alpha.claudeSessionId}/trash`, {});
+  assert.notEqual(refused.status, 200);
+  assert.match(refused.data.error, /danh sách của app/);
+  assert.notEqual((await call(`/api/machines/mA/transcripts/${old}/nuke`, {})).status, 200);
+});
+
 test('phiên ngoài app theo sổ phiên của Claude Code: phiên mở lâu mà ngồi yên vẫn hiện, phiên đã đóng thì không', async () => {
   const { writeFileSync } = await import('node:fs');
   const { spawnSync } = await import('node:child_process');

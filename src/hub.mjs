@@ -925,9 +925,29 @@ export class Hub extends EventEmitter {
     }
   }
 
-  transcripts(machineId) {
-    // 100 phiên mới nhất: danh sách phiên của máy hiện cả phiên cũ (đã đóng) trên máy.
-    return this.machineRpc(machineId).request({ op: 'transcripts', limit: 100 });
+  // view: '' 100 phiên cũ mới nhất (danh sách phiên của máy hiện cả phiên đã đóng), 'hidden' phiên đã ẩn,
+  // 'trash' phiên trong thùng rác. Đầu máy bản cũ không biết view nên trả danh sách thường, thiếu hiddenCount.
+  async transcripts(machineId, view = '') {
+    const v = view === 'hidden' || view === 'trash' ? view : '';
+    const r = await this.machineRpc(machineId).request({ op: 'transcripts', limit: v ? 200 : 100, ...(v ? { view: v } : {}) });
+    if (v && r?.hiddenCount === undefined) throw new Error('Máy này cần setup bản Orbit Remote mới để ẩn hay xoá phiên cũ.');
+    return r;
+  }
+
+  // Ẩn, bỏ ẩn, chuyển vào thùng rác hay khôi phục một phiên cũ trên máy. Phiên còn trong danh sách của app thì
+  // không cho vào thùng rác: "Chạy lại phiên" sau đó sẽ không còn nhật ký để nối tiếp.
+  async transcriptAction(machineId, claudeSessionId, action) {
+    if (!['hide', 'unhide', 'trash', 'restore'].includes(action)) throw new Error('Thao tác không hợp lệ.');
+    if (action === 'trash') {
+      const r = [...this.sessions.values()].find((x) => x.snap.machineId === machineId && x.snap.claudeSessionId === claudeSessionId);
+      if (r) throw new Error(`Phiên này đang có trong danh sách của app ("${r.snap.name}"). Xoá nó khỏi danh sách app trước rồi hãy chuyển vào thùng rác.`);
+    }
+    try {
+      return await this.machineRpc(machineId).request({ op: 'transcript_action', claudeSessionId, action });
+    } catch (err) {
+      if (/không hiểu lệnh/.test(err.message)) throw new Error('Máy này cần setup bản Orbit Remote mới để ẩn hay xoá phiên cũ.');
+      throw err;
+    }
   }
 
   // Mức dùng Claude (usage.mjs) của mọi tài khoản đăng nhập trên các máy đang bật: hỏi song song mọi máy,

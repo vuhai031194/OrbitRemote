@@ -1451,6 +1451,26 @@ input[type='checkbox'] { accent-color: var(--accent); width: 22px; height: 22px;
 .drop-note { padding: 8px 9px 10px; color: var(--text-dim); font-size: 0.84em; line-height: 1.4; }
 .session-drop > .btn { margin-top: 8px; }
 
+/* Phiên cũ gom theo dự án (web/lib/transcripts.js projectBlock): dòng đầu chạm để mở hay gập. */
+.proj + .proj { margin-top: 2px; }
+.proj-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 9px; border-radius: 10px; color: var(--text); text-align: left; font-size: 0.9em; }
+button.proj-head:hover { background: var(--bg-input); }
+.proj-head > svg { flex: none; color: var(--text-dim); }
+.proj-chev { transition: transform 0.25s var(--spring); }
+.proj.open .proj-chev { transform: rotate(90deg); }
+.proj-name { flex: 1; min-width: 0; font-weight: 640; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj-time { flex: none; color: var(--text-dim); font-size: 0.86em; }
+.proj-body { display: none; }
+.proj.open > .proj-body { display: block; }
+.session-drop .proj-body { padding-left: 14px; margin-left: 15px; border-left: 1px solid var(--border); }
+.transcripts .proj.open > .proj-body { display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; }
+.transcripts .proj-head { padding: 6px 4px; }
+.transcripts .proj.fixed .proj-head { padding-top: 10px; }
+.drop-bin { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; padding: 10px 6px 4px; border-top: 1px solid var(--border); }
+.drop-bin .chip { gap: 6px; }
+.tidy { display: flex; flex-direction: column; gap: 8px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
+.tidy-row { display: flex; flex-direction: column; gap: 8px; }
+
 /* ---- Khung màn hình -------------------------------------------------------------------- */
 .screen-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-top: 6px; }
 .screen-head { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }

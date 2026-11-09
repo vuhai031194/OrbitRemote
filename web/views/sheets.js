@@ -11,6 +11,7 @@ import { actionsFor, runAction, NEW_SESSION_DEFAULTS } from '../lib/custom.js';
 import { addToGroup, openRolePicker } from './group.js';
 import { openMoveSheet } from './move.js';
 import { modelOptions, sessionModel } from '../lib/models.js';
+import { ACTION_DONE, groupByProject, onTranscriptsChange, projectBlock, transcriptAction } from '../lib/transcripts.js';
 
 
 export const MODES = [
@@ -226,7 +227,8 @@ export function openNewSession(preset = {}) {
   const online = machines.filter((m) => m.online);
   // Mở từ màn một nhóm: phiên mới vào thẳng nhóm đó, kèm vai trò chọn ngay ở đây.
   const group = preset.groupId ? store.groups.get(preset.groupId) : null;
-  const { body, close } = openSheet(group ? `Phiên mới trong nhóm ${group.name}` : 'Phiên mới', { tall: true });
+  let offTranscripts = null; // nghe danh sách phiên cũ đổi (tab "Mở lại phiên cũ"), thôi nghe khi đóng bảng
+  const { body, close } = openSheet(group ? `Phiên mới trong nhóm ${group.name}` : 'Phiên mới', { tall: true, onClose: () => offTranscripts?.() });
   if (!online.length) {
     body.append(h('div', { class: 'empty small' }, 'Chưa có máy nào đang nối. Bật một máy có Orbit Remote lên là nó tự nối vào trạm.'));
     return;
@@ -507,12 +509,24 @@ export function openNewSession(preset = {}) {
     clear(pane);
     const list = h('div', { class: 'transcripts' }, h('div', { class: 'loading' }, 'Đang đọc nhật ký phiên…'));
     add(pane, group ? roleField() : null, machinePicker(renderOld), list);
+    const machineId = form.machineId;
     try {
-      const { transcripts } = await transcriptsFor(form.machineId);
+      const { transcripts, hiddenCount = 0, trashCount = 0 } = await transcriptsFor(machineId);
       clear(list);
       if (!transcripts.length) list.append(h('div', { class: 'empty small' }, 'Máy này chưa có phiên Claude nào.'));
-      for (const t of transcripts) {
+      const card = (t) => {
         const actions = h('div', { class: 'transcript-actions hidden' });
+        // Ẩn hay chuyển vào thùng rác: danh sách tự dựng lại (onTranscriptsChange ở cuối openNewSession).
+        const tidy = async (action, btn) => {
+          btn.disabled = true;
+          try {
+            await transcriptAction(machineId, t.claudeSessionId, action);
+            toast(ACTION_DONE[action]);
+          } catch (err) {
+            btn.disabled = false;
+            toast(err.message, 'error');
+          }
+        };
         const open = async (fork) => {
           try {
             const snap = await api.post(`/api/machines/${form.machineId}/open`, {
@@ -528,23 +542,112 @@ export function openNewSession(preset = {}) {
         add(actions,
           h('button', { class: 'btn small', onclick: () => open(false) }, 'Tiếp tục phiên này'),
           h('button', { class: 'btn small ghost', onclick: () => open(true) }, 'Tách nhánh mới'),
+          h('button', { class: 'btn small ghost', type: 'button', title: 'Thôi hiện trong danh sách, nhật ký giữ nguyên', onclick: (e) => tidy('hide', e.currentTarget) }, icon('eyeoff', 14), 'Ẩn'),
+          h('button', { class: 'btn small ghost', type: 'button', title: 'Dời nhật ký vào thùng rác của Orbit Remote, khôi phục được', onclick: (e) => tidy('trash', e.currentTarget) }, icon('trash', 14), 'Thùng rác'),
           t.maybeActive ? h('div', { class: 'field-hint warn' }, 'Phiên này vừa được ghi gần đây, có thể vẫn đang mở ở VS Code hay terminal. Nên tách nhánh để hai bên không ghi chồng lên nhau.') : null,
         );
-        list.append(h('div', { class: 'transcript' },
+        return h('div', { class: 'transcript' },
           h('button', { class: 'transcript-main', type: 'button', onclick: () => actions.classList.toggle('hidden') },
             h('div', { class: 'transcript-title' }, t.title, t.maybeActive ? h('span', { class: 'tag live' }, 'đang mở?') : null),
-            h('div', { class: 'transcript-meta' }, [baseName(t.cwd), timeAgo(t.modified),
-              t.sizeKb >= 1024 ? `${(t.sizeKb / 1024).toFixed(1)} MB` : `${t.sizeKb} KB`].filter(Boolean).join(' · '))),
-          actions));
-      }
+            h('div', { class: 'transcript-meta' }, [timeAgo(t.modified), sizeText(t.sizeKb)].filter(Boolean).join(' · '))),
+          actions);
+      };
+      // Gom theo dự án; chỉ một dự án thì khối đó luôn mở.
+      const projects = groupByProject(transcripts);
+      for (const g of projects) list.append(projectBlock(g, card, { alwaysOpen: projects.length === 1 }));
+      list.append(binChips(machineId, hiddenCount, trashCount));
     } catch (err) {
       clear(list).append(h('div', { class: 'empty small' }, err.message));
     }
   }
+  // Danh sách phiên cũ của một máy vừa đổi (ẩn, thùng rác, khôi phục, ở đây hay ở bảng "Phiên đã dọn"): đọc lại.
+  offTranscripts = onTranscriptsChange((machineId) => {
+    transcriptCache.delete(machineId);
+    if (tabOld.classList.contains('active') && machineId === form.machineId) renderOld();
+  });
 
   tabNew.addEventListener('click', () => { tabNew.classList.add('active'); tabOld.classList.remove('active'); renderNew(); });
   tabOld.addEventListener('click', () => { tabOld.classList.add('active'); tabNew.classList.remove('active'); renderOld(); });
   renderNew();
+}
+
+// ---- Phiên cũ đã dọn: đã ẩn và thùng rác -------------------------------------------------
+const sizeText = (kb) => (!kb ? '' : kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`);
+const agoText = (iso) => {
+  const a = timeAgo(iso);
+  return !a || a === 'vừa xong' || /\d+\/\d+/.test(a) ? a : `${a} trước`;
+};
+
+// Hai nút cuối danh sách phiên cũ, chỉ hiện khi có phiên đã ẩn hay trong thùng rác.
+function binChips(machineId, hiddenCount, trashCount) {
+  if (!hiddenCount && !trashCount) return null;
+  return h('div', { class: 'drop-bin' },
+    hiddenCount ? h('button', { class: 'chip small', type: 'button', onclick: () => openTranscriptBin(machineId, 'hidden') }, icon('eyeoff', 14), `Đã ẩn ${hiddenCount}`) : null,
+    trashCount ? h('button', { class: 'chip small', type: 'button', onclick: () => openTranscriptBin(machineId, 'trash') }, icon('trash', 14), `Thùng rác ${trashCount}`) : null);
+}
+
+// Bảng xem lại phiên đã ẩn hay đã chuyển vào thùng rác trên một máy, gom theo dự án, bỏ ẩn hay khôi phục từng phiên.
+// view: 'hidden' | 'trash'. Không có nút xoá hẳn: muốn xoá hẳn thì xoá tệp trong thư mục thùng rác trên máy.
+export function openTranscriptBin(machineId, view = 'hidden') {
+  const name = store.machines.get(machineId)?.name || '';
+  const { body } = openSheet(name ? `Phiên đã dọn · ${name}` : 'Phiên đã dọn', { tall: true });
+  let current = view === 'trash' ? 'trash' : 'hidden';
+  const tabHidden = h('button', { class: 'tab', type: 'button' }, 'Đã ẩn');
+  const tabTrash = h('button', { class: 'tab', type: 'button' }, 'Thùng rác');
+  const hint = h('div', { class: 'field-hint' });
+  const list = h('div', { class: 'transcripts' });
+  body.append(h('div', { class: 'tabs' }, tabHidden, tabTrash), hint, list);
+
+  const card = (t) => {
+    const action = current === 'hidden' ? 'unhide' : 'restore';
+    const btn = h('button', { class: 'btn small', type: 'button', onclick: async () => {
+      btn.disabled = true;
+      try {
+        await transcriptAction(machineId, t.claudeSessionId, action);
+        toast(ACTION_DONE[action]);
+        render();
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message, 'error');
+      }
+    } }, icon(action === 'unhide' ? 'eye' : 'history', 14), action === 'unhide' ? 'Bỏ ẩn' : 'Khôi phục');
+    return h('div', { class: 'transcript' },
+      h('div', { class: 'transcript-main' },
+        h('div', { class: 'transcript-title' }, t.title),
+        h('div', { class: 'transcript-meta' }, [agoText(t.modified), sizeText(t.sizeKb),
+          t.trashedAt ? `vào thùng rác ${agoText(t.trashedAt)}` : ''].filter(Boolean).join(' · '))),
+      h('div', { class: 'transcript-actions' }, btn));
+  };
+
+  let turn = 0;
+  async function render() {
+    const mine = ++turn;
+    tabHidden.classList.toggle('active', current === 'hidden');
+    tabTrash.classList.toggle('active', current === 'trash');
+    hint.textContent = current === 'hidden'
+      ? 'Phiên đã ẩn vẫn còn nguyên nhật ký trên máy, chỉ thôi hiện trong danh sách phiên cũ.'
+      : 'Nhật ký trong thùng rác đã được dời khỏi thư mục của Claude Code. Khôi phục là dời về đúng chỗ cũ.';
+    clear(list).append(h('div', { class: 'loading' }, 'Đang đọc…'));
+    try {
+      const r = await api.get(`/api/machines/${machineId}/transcripts?view=${current}`);
+      if (mine !== turn) return;
+      tabHidden.textContent = r.hiddenCount ? `Đã ẩn (${r.hiddenCount})` : 'Đã ẩn';
+      tabTrash.textContent = r.trashCount ? `Thùng rác (${r.trashCount})` : 'Thùng rác';
+      if (current === 'trash' && r.trashDir) hint.textContent += ` Muốn xoá hẳn thì xoá tệp trong ${r.trashDir} trên máy.`;
+      clear(list);
+      const items = r.transcripts || [];
+      if (!items.length) {
+        list.append(h('div', { class: 'empty small' }, current === 'hidden' ? 'Chưa ẩn phiên nào.' : 'Thùng rác trống.'));
+        return;
+      }
+      for (const g of groupByProject(items)) list.append(projectBlock(g, card, { alwaysOpen: true }));
+    } catch (err) {
+      if (mine === turn) clear(list).append(h('div', { class: 'empty small' }, err.message));
+    }
+  }
+  tabHidden.addEventListener('click', () => { current = 'hidden'; render(); });
+  tabTrash.addEventListener('click', () => { current = 'trash'; render(); });
+  render();
 }
 
 // ---- Tuỳ chọn của một phiên -------------------------------------------------------

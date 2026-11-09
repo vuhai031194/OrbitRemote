@@ -1,7 +1,9 @@
 // Đọc nhật ký phiên mà Claude Code tự ghi ra ~/.claude/projects/<thư mục>/<mã phiên>.jsonl.
 //
 // Nhờ đó app thấy được cả những phiên mở bằng tay trong VS Code hay terminal, và mở lại
-// lịch sử của một phiên sau khi trạm khởi động lại. Chỉ đọc, không bao giờ ghi vào đó.
+// lịch sử của một phiên sau khi trạm khởi động lại. Không bao giờ sửa nội dung nhật ký. Chỉ có hai việc
+// người dùng tự bấm từ app là chạm tới file (transcriptAction): "Ẩn" chỉ ghi mã phiên vào sổ riêng của
+// Orbit Remote; "Chuyển vào thùng rác" dời nguyên file sang thư mục trạng thái, khôi phục được.
 //
 // File nhật ký có thể nặng hàng chục, thậm chí hàng trăm MB (đo trên máy thật: 140 MB), và
 // đầu máy quét định kỳ để thấy phiên đang mở ngoài app. Vì vậy:
@@ -9,19 +11,31 @@
 //   - phần đầu file (thư mục, câu hỏi đầu) chỉ đọc một lần, vì nó không bao giờ đổi;
 //   - lịch sử chỉ đọc phần ĐUÔI file, đủ cho vài trăm sự kiện cuối.
 
-import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, cpSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { summarizeTool } from './claude-session.mjs';
+import { STATE_DIR, readJson, writeJsonAtomic } from './paths.mjs';
 
 export const PROJECTS_DIR = process.env.ORBIT_REMOTE_PROJECTS || join(homedir(), '.claude', 'projects');
 // Sổ phiên đang chạy của Claude Code nằm cạnh thư mục nhật ký: ~/.claude/sessions/<pid>.json.
 const SESSIONS_DIR = process.env.ORBIT_REMOTE_CLAUDE_SESSIONS || join(dirname(PROJECTS_DIR), 'sessions');
+// Phiên người dùng ẩn khỏi danh sách phiên cũ: { ids: [mã phiên] }. Nhật ký vẫn nằm nguyên chỗ cũ.
+const HIDDEN_FILE = join(STATE_DIR, 'hidden-transcripts.json');
+// Thùng rác: <TRASH_DIR>/<thư mục dự án trong ~/.claude/projects>/<mã phiên>.jsonl, kèm thư mục cùng tên nếu
+// Claude Code có tạo (nhật ký phiên con, kết quả công cụ lớn). index.json nhớ lúc chuyển vào.
+export const TRASH_DIR = join(STATE_DIR, 'transcript-trash');
+const TRASH_INDEX = join(TRASH_DIR, 'index.json');
+const SESSION_ID = /^[0-9a-f-]{36}$/i;
 const HEAD_BYTES = 96 * 1024;
 const TAIL_BYTES = 64 * 1024;
 const HISTORY_TAIL_BYTES = 3 * 1024 * 1024;
 export const ACTIVE_WINDOW_MS = 90 * 1000;
-const CACHE_MAX = 400;
+// Danh sách phiên cũ phải đọc qua mọi nhật ký rỗng (xem listTranscripts), mà máy có thể có cả nghìn
+// file (plugin claude-mem đẻ ra hàng trăm phiên nền). Sổ nhớ nhỏ hơn số file thì mỗi lần mở danh sách
+// lại đọc lại từ đầu; mỗi mục nhỏ (câu hỏi đầu cắt còn PROMPT_MAX ký tự) nên giữ nhiều cũng rẻ.
+const CACHE_MAX = 5000;
+const PROMPT_MAX = 200;
 
 const cache = new Map(); // đường dẫn -> { mtime, size, head: { cwd, prompt }, title }
 
@@ -97,7 +111,7 @@ function describe({ file, mtime, size }) {
       if (!prompt) prompt = firstUserText(e);
       if (e.type === 'ai-title' && e.aiTitle) title = e.aiTitle;
     }
-    c = { head: { cwd, prompt }, title };
+    c = { head: { cwd, prompt: prompt.slice(0, PROMPT_MAX) }, title };
   }
   // Tiêu đề do AI đặt được ghi lại nhiều lần trong đời phiên: lấy bản mới nhất ở đuôi file.
   if (size > HEAD_BYTES) {
@@ -164,7 +178,8 @@ function transcriptOf(claudeSessionId) {
 export function listExternalSessions({ exclude = new Set(), max = 20, windowMs = 15 * 60 * 1000 } = {}) {
   const open = listOpenSessions();
   if (!open) {
-    return listTranscripts(max, { sinceMs: windowMs })
+    // Phiên đang mở thì vẫn báo dù người dùng đã ẩn nó khỏi danh sách phiên cũ.
+    return listTranscripts(max, { sinceMs: windowMs, hidden: 'all' })
       .filter((t) => !exclude.has(t.claudeSessionId))
       .map(({ claudeSessionId, title, cwd, modified, maybeActive }) => ({ claudeSessionId, title, cwd, modified, active: maybeActive, open: false }));
   }
@@ -186,28 +201,195 @@ export function listExternalSessions({ exclude = new Set(), max = 20, windowMs =
     });
 }
 
-// limit: số file mới nhất; sinceMs: chỉ lấy file được ghi trong khoảng này.
-export function listTranscripts(limit = 40, { sinceMs = 0 } = {}) {
+// Một dòng trong danh sách phiên cũ (dạng app nhận).
+function entryOf(f, d, claudeSessionId, maybeActive) {
+  return {
+    claudeSessionId,
+    title: d.title || d.head.prompt.slice(0, 80) || '(chưa có câu hỏi)',
+    prompt: d.head.prompt,
+    cwd: d.head.cwd,
+    modified: new Date(f.mtime).toISOString(),
+    sizeKb: Math.round(f.size / 1024),
+    maybeActive,
+  };
+}
+
+const hiddenIds = () => {
+  const ids = readJson(HIDDEN_FILE, {})?.ids;
+  return new Set(Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : []);
+};
+
+// limit: số phiên mới nhất; sinceMs: chỉ lấy file được ghi trong khoảng này.
+// hidden: 'skip' bỏ phiên người dùng đã ẩn (mặc định), 'only' chỉ lấy phiên đã ẩn, 'all' không xét.
+// Nhật ký không có câu hỏi nào của người dùng (không tiêu đề, không câu hỏi) bị bỏ trước khi đếm `limit`:
+// đó là phiên nền do plugin hay hook đẻ ra (claude-mem ghi hàng trăm phiên như vậy), không có gì để xem,
+// mà để lại thì chúng chiếm hết chỗ của phiên thật. Riêng phiên đang mở thì vẫn giữ dù chưa hỏi gì.
+export function listTranscripts(limit = 40, { sinceMs = 0, hidden = 'skip' } = {}) {
   const now = Date.now();
   let files = allFiles().sort((a, b) => b.mtime - a.mtime);
   if (sinceMs) files = files.filter((f) => now - f.mtime < sinceMs);
   const open = listOpenSessions();
   const openIds = open ? new Set(open.map((s) => s.sessionId)) : null;
-  return files.slice(0, limit).map((f) => {
-    const d = describe(f);
+  const hiddenSet = hidden === 'all' ? null : hiddenIds();
+  const out = [];
+  for (const f of files) {
+    if (out.length >= limit) break;
     const claudeSessionId = basename(f.file, '.jsonl');
-    return {
-      claudeSessionId,
-      title: d.title || d.head.prompt.slice(0, 80) || '(chưa có câu hỏi)',
-      prompt: d.head.prompt.slice(0, 200),
-      cwd: d.head.cwd,
-      modified: new Date(f.mtime).toISOString(),
-      sizeKb: Math.round(f.size / 1024),
-      // Có sổ phiên thì biết chắc phiên nào đang mở; không có thì đoán: file vừa được ghi rất gần
-      // đây thì nhiều khả năng phiên đó vẫn đang mở ở đâu đó.
-      maybeActive: openIds ? openIds.has(claudeSessionId) : now - f.mtime < ACTIVE_WINDOW_MS,
-    };
-  });
+    if (hiddenSet && hiddenSet.has(claudeSessionId) !== (hidden === 'only')) continue;
+    const d = describe(f);
+    // Có sổ phiên thì biết chắc phiên nào đang mở; không có thì đoán: file vừa được ghi rất gần
+    // đây thì nhiều khả năng phiên đó vẫn đang mở ở đâu đó.
+    const maybeActive = openIds ? openIds.has(claudeSessionId) : now - f.mtime < ACTIVE_WINDOW_MS;
+    if (!d.title && !d.head.prompt && !maybeActive) continue;
+    out.push(entryOf(f, d, claudeSessionId, maybeActive));
+  }
+  return out;
+}
+
+// ---- Ẩn và thùng rác --------------------------------------------------------------------------
+
+// Các nhật ký đang nằm trong thùng rác: [{ file, mtime, size, dir }], dir là tên thư mục dự án cũ.
+function trashFiles() {
+  let dirs;
+  try {
+    dirs = readdirSync(TRASH_DIR, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const dir of dirs) {
+    if (!dir.isDirectory()) continue;
+    let names;
+    try {
+      names = readdirSync(join(TRASH_DIR, dir.name));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith('.jsonl')) continue;
+      try {
+        const st = statSync(join(TRASH_DIR, dir.name, name));
+        out.push({ file: join(TRASH_DIR, dir.name, name), mtime: st.mtimeMs, size: st.size, dir: dir.name });
+      } catch {
+        // vừa bị dời đi
+      }
+    }
+  }
+  return out;
+}
+
+// Phiên trong thùng rác, mới chuyển vào trước. Mỗi dòng có thêm `trashedAt`.
+export function listTrash(limit = 200) {
+  const index = readJson(TRASH_INDEX, {}) || {};
+  return trashFiles()
+    .map((f) => {
+      const claudeSessionId = basename(f.file, '.jsonl');
+      return { ...entryOf(f, describe(f), claudeSessionId, false), trashedAt: index[claudeSessionId]?.at || null };
+    })
+    .sort((a, b) => (b.trashedAt || b.modified).localeCompare(a.trashedAt || a.modified))
+    .slice(0, limit);
+}
+
+// Số phiên đã ẩn (còn nhật ký trên máy) và số phiên trong thùng rác, cho hai nút ở cuối danh sách.
+export function transcriptBin() {
+  const hidden = hiddenIds();
+  let hiddenCount = 0;
+  if (hidden.size) for (const f of allFiles()) if (hidden.has(basename(f.file, '.jsonl'))) hiddenCount += 1;
+  return { hiddenCount, trashCount: trashFiles().length, trashDir: TRASH_DIR };
+}
+
+// Dời một file hay thư mục. Khác ổ đĩa (trạng thái để ở ổ khác) thì không đổi tên thẳng được: chép rồi xoá.
+function move(from, to) {
+  mkdirSync(dirname(to), { recursive: true });
+  try {
+    renameSync(from, to);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    cpSync(from, to, { recursive: true });
+    rmSync(from, { recursive: true, force: true });
+  }
+}
+
+const isDir = (p) => {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+// Dời nhật ký <dir>/<id>.jsonl (kèm thư mục <dir>/<id> nếu có) từ gốc `from` sang gốc `to`. Dời thư mục kèm
+// hỏng thì trả file nhật ký về chỗ cũ, để không bao giờ còn một nửa ở mỗi bên.
+function moveTranscript(fromRoot, toRoot, dir, id) {
+  const fromFile = join(fromRoot, dir, `${id}.jsonl`);
+  const toFile = join(toRoot, dir, `${id}.jsonl`);
+  if (existsSync(toFile)) throw new Error('Chỗ đến đã có một nhật ký cùng mã phiên.');
+  move(fromFile, toFile);
+  const extra = join(fromRoot, dir, id);
+  if (!isDir(extra)) return;
+  try {
+    move(extra, join(toRoot, dir, id));
+  } catch (err) {
+    move(toFile, fromFile);
+    throw err;
+  }
+}
+
+function busyText(err) {
+  return ['EBUSY', 'EPERM', 'EACCES'].includes(err.code)
+    ? 'Không dời được nhật ký: file đang bị một chương trình khác mở (phiên còn chạy ở đâu đó?).'
+    : `Không dời được nhật ký: ${err.message}`;
+}
+
+// Việc người dùng bấm từ app với một phiên cũ: 'hide' | 'unhide' | 'trash' | 'restore'.
+// Phiên đang mở (theo sổ phiên của Claude Code) thì không cho chuyển vào thùng rác.
+export function transcriptAction(claudeSessionId, action) {
+  const id = String(claudeSessionId || '');
+  if (!SESSION_ID.test(id)) throw new Error('Mã phiên không hợp lệ.');
+  if (action === 'hide' || action === 'unhide') {
+    if (action === 'hide' && !findTranscript(id)) throw new Error('Không thấy nhật ký của phiên này trên máy.');
+    // Nhân tiện bỏ mã của nhật ký không còn (Claude Code tự xoá sau 30 ngày) để sổ không phình mãi.
+    const present = new Set(allFiles().map((f) => basename(f.file, '.jsonl')));
+    const ids = [...hiddenIds()].filter((x) => x !== id && present.has(x));
+    if (action === 'hide') ids.push(id);
+    writeJsonAtomic(HIDDEN_FILE, { ids });
+    return { ok: true };
+  }
+  if (action === 'trash') {
+    if (listOpenSessions()?.some((s) => s.sessionId === id)) {
+      throw new Error('Phiên này đang mở ở VS Code hay terminal. Đóng nó trước rồi hãy chuyển vào thùng rác.');
+    }
+    const file = findTranscript(id);
+    if (!file) throw new Error('Không thấy nhật ký của phiên này trên máy.');
+    const dir = basename(dirname(file));
+    try {
+      moveTranscript(PROJECTS_DIR, TRASH_DIR, dir, id);
+    } catch (err) {
+      throw new Error(err.message.startsWith('Chỗ đến') ? err.message : busyText(err));
+    }
+    cache.delete(file);
+    const index = readJson(TRASH_INDEX, {}) || {};
+    index[id] = { dir, at: new Date().toISOString() };
+    writeJsonAtomic(TRASH_INDEX, index);
+    const hidden = hiddenIds();
+    if (hidden.delete(id)) writeJsonAtomic(HIDDEN_FILE, { ids: [...hidden] });
+    return { ok: true };
+  }
+  if (action === 'restore') {
+    const found = trashFiles().find((f) => basename(f.file, '.jsonl') === id);
+    if (!found) throw new Error('Phiên này không còn trong thùng rác.');
+    try {
+      moveTranscript(TRASH_DIR, PROJECTS_DIR, found.dir, id);
+    } catch (err) {
+      throw new Error(err.message.startsWith('Chỗ đến') ? err.message : busyText(err));
+    }
+    cache.delete(found.file);
+    const index = readJson(TRASH_INDEX, {}) || {};
+    delete index[id];
+    writeJsonAtomic(TRASH_INDEX, index);
+    return { ok: true };
+  }
+  throw new Error(`Không có thao tác "${action}".`);
 }
 
 export function findTranscript(claudeSessionId) {

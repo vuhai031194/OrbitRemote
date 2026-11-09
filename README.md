@@ -21,6 +21,10 @@ they run on different machines.
   and sessions.
 - **Open, close and restart sessions** on the machine you pick; **reopen old sessions** from Claude Code's transcripts;
   view (read-only), continue or fork sessions that are open by hand in VS Code or a terminal.
+- **Old sessions grouped by project**, with background sessions that have no question (plugins such as claude-mem)
+  left out. Tidy the list your way: **hide** a session (its transcript stays where it is) or **move it to the trash**
+  (the transcript moves to `~/.orbit/state/remote/transcript-trash`). Both can be undone from **Đã ẩn** (hidden) and
+  **Thùng rác** (trash) at the end of the list.
 - **Chat, stop the running turn, approve permissions** (allow, deny, always allow) and answer Claude's multiple-choice
   questions.
 - A composer like the Claude app: attach files and images (Ctrl+V works), pick model, effort and permission mode, dictate

@@ -83,9 +83,11 @@ const calls = [];
 // Màn của máy còn hỏi nhiệt độ máy theo nhịp; phép kiểm này chỉ đếm lần hỏi danh sách phiên.
 const transcriptCalls = () => calls.filter((p) => p.endsWith('/transcripts'));
 let fail = false;
+let reply = null; // phép kiểm cần máy trả lời khác: (path) => dữ liệu
 define('fetch', async (path) => {
   calls.push(path);
   if (fail) return { ok: false, status: 502, json: async () => ({ error: 'Máy không trả lời.' }) };
+  if (reply) return { ok: true, status: 200, json: async () => reply(path) };
   return { ok: true, status: 200, json: async () => ({ transcripts: TRANSCRIPTS, dirs: ['C:\\Orbit'] }) };
 });
 
@@ -173,5 +175,51 @@ test('xem một phiên cũ: tên đúng, báo phiên đã đóng, có nút thao 
   } finally {
     unmount();
     fail = false;
+  }
+});
+
+test('phiên cũ gom theo dự án (d:\\X và D:\\X là một), gập sẵn, có nút ⋯ từng phiên và hai nút "Đã ẩn", "Thùng rác"; ẩn một phiên thì dòng đó biến mất và máy được hỏi lại', async () => {
+  const { transcriptAction } = await import('../web/lib/transcripts.js');
+  let list = [
+    { claudeSessionId: csid(5), title: 'Sửa trang đăng nhập', cwd: 'D:\\Alpha', modified: '2026-11-09T10:00:00Z', sizeKb: 120, maybeActive: false },
+    { claudeSessionId: csid(6), title: 'Viết test', cwd: 'D:\\Beta', modified: '2026-11-09T09:00:00Z', sizeKb: 80, maybeActive: false },
+    { claudeSessionId: csid(7), title: 'Dọn code', cwd: 'd:\\alpha\\', modified: '2026-11-08T09:00:00Z', sizeKb: 40, maybeActive: false },
+  ];
+  reply = (path) => {
+    if (path.endsWith('/hide')) {
+      list = list.filter((t) => !path.includes(t.claudeSessionId));
+      return { ok: true };
+    }
+    return { transcripts: list, dirs: [], hiddenCount: 2, trashCount: 1 };
+  };
+  store.machines.set('m3', { id: 'm3', name: 'Laptop', online: true, platform: 'win32', screen: null, external: [] });
+  const root = new FakeEl('div');
+  const unmount = mountMachine(root, 'm3');
+  try {
+    root.find('drop-btn').dispatch('click');
+    for (let i = 0; i < 5; i += 1) await tick();
+    const drop = root.find('session-drop');
+    const projects = drop.all('proj');
+    assert.deepEqual(projects.map((p) => [p.find('proj-name').text(), p.find('group-count').text()]), [['Alpha', '2'], ['Beta', '1']],
+      'dự án có phiên gần nhất đứng đầu; hai cách viết hoa của cùng thư mục là một dự án');
+    assert.ok(projects.every((p) => !p.classList.contains('open')), 'nhiều dự án thì gập sẵn');
+    assert.deepEqual(projects[0].all('past').map((r) => r.find('drop-name').text()), ['Sửa trang đăng nhập', 'Dọn code']);
+    const head = projects[0].find('proj-head');
+    head.dispatch('click');
+    assert.ok(projects[0].classList.contains('open'));
+    assert.equal(head.attrs['aria-expanded'], 'true');
+    assert.equal(drop.all('drop-float').length, 3, 'mỗi phiên cũ một nút ⋯');
+    assert.deepEqual(drop.find('drop-bin').all('chip').map((c) => c.text()), ['Đã ẩn 2', 'Thùng rác 1']);
+
+    const asked = transcriptCalls().length;
+    await transcriptAction('m3', csid(7), 'hide');
+    assert.ok(calls.includes(`/api/machines/m3/transcripts/${csid(7)}/hide`));
+    for (let i = 0; i < 5; i += 1) await tick();
+    assert.equal(transcriptCalls().length, asked + 1, 'hỏi máy lại cho đúng số đếm');
+    const names = drop.all('past').map((r) => r.find('drop-name').text());
+    assert.deepEqual(names, ['Sửa trang đăng nhập', 'Viết test'], 'phiên vừa ẩn không còn trong danh sách');
+  } finally {
+    unmount();
+    reply = null;
   }
 });

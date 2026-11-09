@@ -18,6 +18,9 @@ khiển màn hình máy, cho các phiên nhắn tin và làm việc nhóm với 
   Màn chính là cây **Online / Offline**: máy, nhóm phiên và phiên của từng máy.
 - **Mở phiên mới, đóng, chạy lại** trên đúng máy mình chọn; **mở lại phiên cũ** từ nhật ký Claude Code; xem (chỉ đọc),
   tiếp tục hay tách nhánh các phiên đang mở tay trong VS Code hoặc terminal.
+- **Phiên cũ gom theo dự án**, bỏ các phiên nền không có câu hỏi (của plugin như claude-mem). Dọn danh sách theo hai
+  cách: **ẩn** (nhật ký giữ nguyên chỗ cũ) hoặc **chuyển vào thùng rác** (nhật ký dời sang
+  `~/.orbit/state/remote/transcript-trash`). Cả hai đều lấy lại được ở mục **Đã ẩn** và **Thùng rác** cuối danh sách.
 - **Chat, dừng lượt đang chạy, duyệt quyền** (cho phép, từ chối, luôn cho phép) và trả lời câu hỏi nhiều lựa chọn của Claude.
 - Ô soạn như app Claude: đính kèm tệp và ảnh (dán bằng Ctrl+V được), chọn model, effort, chế độ quyền, nói thay gõ,
   giữ phần soạn dở của từng phiên. Ảnh và tệp Claude nhắc tới trong câu trả lời mở xem được ngay trên điện thoại.
