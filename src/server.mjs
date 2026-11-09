@@ -10,10 +10,11 @@
 
 import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, relative, sep } from 'node:path';
 import { CUSTOM_DIR, WEB_DIR, writeJsonAtomic } from './paths.mjs';
+export const ACTIONS_LOCAL = 'actions.local.json'; // nút tuỳ biến người dùng sửa trên app (ngoài git, xem .gitignore)
 import { NONCE } from './hub-identity.mjs';
 import { hostAllowed, hostNamesOf } from './netaddr.mjs';
 import { hostname as osHostname } from 'node:os';
@@ -528,7 +529,9 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
         if (!body || typeof body !== 'object' || !Array.isArray(body.actions)) {
           throw new HttpError(400, 'Cần một đối tượng có mảng "actions".');
         }
-        writeJsonAtomic(join(CUSTOM_DIR, 'actions.json'), body);
+        // Ghi vào tệp riêng của máy (ngoài git), không đè custom/actions.json của kho: tệp đó mà bị sửa thì lần
+        // "Setup máy" sau, git pull --ff-only có thể bị chặn khi bản mới cũng đổi tệp đó.
+        writeJsonAtomic(join(CUSTOM_DIR, ACTIONS_LOCAL), body);
         broadcast('custom', { file: 'actions.json' });
         return sendJson(res, 200, { ok: true });
       }
@@ -703,6 +706,8 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
       // theme.css: trang ghép đôi (chưa có thẻ) cũng cần. Phần còn lại (nút tuỳ biến, bảng token, địa chỉ trạm) chỉ
       // cho thiết bị đã ghép: ai trên cùng mạng cũng đọc được thì lộ cách bạn dùng và địa chỉ Tailscale của trạm.
       if (name !== 'theme.css' && !auth.check(tokenOf(req), 'device')) throw new HttpError(401, 'Thiết bị chưa ghép đôi.');
+      // Nút tuỳ biến: bản người dùng sửa trên app (actions.local.json) thắng bản mặc định của kho.
+      if (name === 'actions.json' && existsSync(join(CUSTOM_DIR, ACTIONS_LOCAL))) return serveStatic(res, CUSTOM_DIR, ACTIONS_LOCAL);
       return serveStatic(res, CUSTOM_DIR, name);
     }
 

@@ -38,7 +38,7 @@ import { MACHINE_NAME, PIPE_PATH, SETUP_RESULT_FILE, STATE_DIR, TOOL_DIR, ensure
 import { isPrivate } from './netaddr.mjs';
 import { findTailscale, readTailscaleStatus, tailnetFromStatus, tailnetUrls } from './tailnet.mjs';
 import { APP_PROFILE_DIR, openAppWindow } from './pc-app.mjs';
-import { pullRepo, runSetup } from './setup.mjs';
+import { keepUserActions, pullRepo, runSetup, safeUpdate } from './setup.mjs';
 import { crashDecision, spawnMain, spawnMainLater } from './launch.mjs';
 import { loadGrantKey, loadHubKey } from './hub-identity.mjs';
 import { REPO_HUB, publishRepoHub, repoHub, repoHubUrls } from './hub-decl.mjs';
@@ -676,8 +676,22 @@ async function runSetupCommand(fix) {
 // Lệnh "Setup máy" bấm từ app (đầu máy chạy lệnh này ở tiến trình tách riêng): lấy code Orbit Remote
 // mới nhất rồi chạy setup tự động bằng một tiến trình mới, để setup chạy đúng code vừa kéo về.
 async function runUpdate() {
+  if (keepUserActions(TOOL_DIR)) log('Đã chuyển nút tuỳ biến bạn sửa sang custom/actions.local.json để git pull không bị chặn.');
   log('Lấy code Orbit Remote mới nhất (git pull --ff-only)…');
-  const { failed, pulled } = await pullRepo(TOOL_DIR, { log });
+  const lastLines = (s) => String(s || '').trim().split('\n').slice(-3).join(' ').slice(0, 400) || 'không rõ lý do';
+  const { failed, pulled } = await safeUpdate(TOOL_DIR, {
+    pull: (repo) => pullRepo(repo, { log }),
+    // Tệp main.mjs trên đĩa giờ là bản mới: chạy nó với lệnh selftest là nạp trọn mọi phần của bản mới.
+    selftest: () => {
+      const t = spawnSync(process.execPath, [SELF, 'selftest'], { encoding: 'utf8', windowsHide: true, timeout: 60000 });
+      return { ok: t.status === 0, why: lastLines(t.stderr || t.stdout) };
+    },
+    reset: (repo, rev) => {
+      const g = spawnSync('git', ['-C', repo, 'reset', '--keep', rev], { encoding: 'utf8', windowsHide: true });
+      return { ok: g.status === 0, why: lastLines(g.stderr) };
+    },
+    log,
+  });
   const r = spawnSync(process.execPath, [SELF, 'setup', '--unattended'], {
     stdio: 'inherit', windowsHide: true,
     // Kéo hỏng thì setup ghi kết quả là còn thiếu (máy vẫn chạy code cũ), không báo "đủ cả".
@@ -691,6 +705,9 @@ const commands = {
   setup: () => runSetupCommand(true),
   doctor: () => runSetupCommand(false),
   update: runUpdate,
+  // Tới được đây là mọi phần của Orbit Remote đã nạp được (main.mjs nạp tất cả ngay từ đầu): "Setup máy" dùng lệnh
+  // này kiểm bản vừa kéo về trước khi dùng nó dựng lại máy (setup.mjs safeUpdate).
+  selftest: async () => log(`Orbit Remote ${VERSION}: nạp đủ mọi phần.`),
   hub: runHub,
   start: runStart,
   open: runOpen,

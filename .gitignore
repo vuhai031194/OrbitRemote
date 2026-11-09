@@ -5,3 +5,7 @@
 custom/hub.json
 
 node_modules/
+
+# Nút tuỳ biến bạn sửa trên app (server.mjs ghi): của riêng máy này, không đè custom/actions.json của kho.
+# Custom buttons you edit in the app: local to this machine, never overwrite the repo's custom/actions.json.
+custom/actions.local.json

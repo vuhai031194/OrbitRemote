@@ -11,7 +11,7 @@
 
 import { spawnSync } from 'node:child_process';
 import net from 'node:net';
-import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveClaude } from './claude-session.mjs';
@@ -842,4 +842,40 @@ export async function runSetup({ fix, args = [], ctx, steps = STEPS }) {
   if (!failed.length) out(fix ? 'Xong: máy này đã đủ để dùng Orbit Remote, kể cả xem và điều khiển màn hình.' : 'Đủ cả.');
   else out(`Còn ${failed.length} mục chưa xong: ${failed.join('; ')}.${fix ? ' Sửa theo ghi chú ở trên rồi chạy lại setup.cmd.' : ' Chạy setup.cmd để cài.'}`);
   return failed.length || user.length ? 1 : 0;
+}
+
+// ---- Lấy code mới an toàn ("Setup máy") ------------------------------------------------------------
+export function gitHead(repo, run = spawnSync) {
+  const r = run('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true });
+  return r.status === 0 ? String(r.stdout).trim() : '';
+}
+
+// Bản cũ của app ghi thẳng vào custom/actions.json của kho. Tệp đó mà đang bị sửa thì git pull --ff-only bị chặn
+// khi bản mới cũng đổi nó: chuyển phần người dùng sửa sang custom/actions.local.json (app đọc tệp này trước), rồi
+// trả tệp của kho về như cũ. Trả true nếu có chuyển.
+export function keepUserActions(repo, run = spawnSync) {
+  const git = (...args) => run('git', ['-C', repo, ...args], { encoding: 'utf8', windowsHide: true });
+  const st = git('status', '--porcelain', '--', 'custom/actions.json');
+  if (st.status !== 0 || !/^\s?M/.test(String(st.stdout))) return false;
+  const local = join(repo, 'custom', 'actions.local.json');
+  if (!existsSync(local)) copyFileSync(join(repo, 'custom', 'actions.json'), local);
+  return git('checkout', '--', 'custom/actions.json').status === 0;
+}
+
+// Kéo code mới; có bản mới thì kiểm nó nạp được trọn (selftest) trước khi dùng nó dựng lại máy. Hỏng thì quay về
+// đúng bản trước khi kéo (git reset --keep: giữ thay đổi chưa commit), để máy không tắt ngấm mà không cứu được từ xa.
+// Trả như pullRepo: { failed, pulled } (pulled là lời báo cho app), kèm rolledBack (lời báo, '' nếu không quay về).
+export async function safeUpdate(repo, { pull, head = gitHead, selftest, reset, log = () => {} }) {
+  const before = head(repo);
+  const r = await pull(repo);
+  const after = head(repo);
+  if (r.failed || !before || !after || before === after) return { ...r, rolledBack: '' };
+  const t = selftest();
+  if (t.ok) return { ...r, rolledBack: '' };
+  const back = reset(repo, before);
+  const rolledBack = back.ok
+    ? `code mới (${after.slice(0, 7)}) không chạy được: ${t.why}. Đã quay về bản trước (${before.slice(0, 7)}), máy vẫn chạy code cũ.`
+    : `code mới (${after.slice(0, 7)}) không chạy được: ${t.why}. Không quay về bản trước được: ${back.why}.`;
+  log(rolledBack);
+  return { failed: true, pulled: `không kéo được: ${rolledBack}`, rolledBack };
 }
