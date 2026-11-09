@@ -2809,3 +2809,11 @@ html.float-moving, html.float-moving * { cursor: var(--float-cursor, grabbing) !
 /* Lời báo có nút (dom.js toast action), như "Hoàn tác" sau khi ẩn hay chuyển phiên cũ vào thùng rác. */
 .toast.has-action { display: flex; align-items: center; gap: 12px; }
 .toast-action { flex: none; min-height: 36px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--accent-cyan); font-weight: 600; cursor: pointer; }
+
+/* Màn cảm ứng: chỗ chạm tối thiểu khoảng 44px (hướng dẫn của Apple, WCAG 2.5.5). Máy có chuột giữ nguyên cỡ gọn. */
+@media (pointer: coarse) {
+  .fold-btn, .drop-float, .icon-btn.small, .tool-round, .composer-tools .round-btn { min-width: 44px; min-height: 44px; }
+  .pick-chip { min-height: 40px; }
+  .title-action, .tree-empty-action { min-height: 40px; padding-top: 8px; padding-bottom: 8px; }
+  .attach-x::after { content: ''; position: absolute; inset: -11px; } /* hình 22px, vùng chạm 44px */
+}

@@ -32,6 +32,7 @@ export const EFFORTS = [
 ];
 
 let openCount = 0;
+const sheetStack = []; // bảng đang mở, trên cùng ở cuối: Esc chỉ đóng bảng trên cùng
 
 // cls: lớp thêm cho bảng (ví dụ "viewer" của khung xem tệp); onClose: chạy một lần khi bảng đóng.
 export function openSheet(title, { tall = false, cls = '', onClose = null } = {}) {
@@ -40,20 +41,35 @@ export function openSheet(title, { tall = false, cls = '', onClose = null } = {}
   const closeBtn = h('button', { class: 'icon-btn', 'aria-label': 'Đóng' }, icon('x'));
   const head = h('div', { class: 'sheet-head' }, h('h3', { title }, title), closeBtn);
   const grip = h('div', { class: 'sheet-grip' });
-  const sheet = h('div', { class: `sheet${tall ? ' tall' : ''}${cls ? ` ${cls}` : ''}`, role: 'dialog', 'aria-label': title }, grip, head, body);
+  const sheet = h('div', { class: `sheet${tall ? ' tall' : ''}${cls ? ` ${cls}` : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, grip, head, body);
   const backdrop = h('div', { class: 'sheet-backdrop' });
   root.append(backdrop, sheet);
   openCount += 1;
   document.body.classList.add('sheet-open');
+  // Bàn phím và trình đọc màn hình: tiêu điểm vào bảng (nút Đóng), Esc đóng bảng trên cùng, đóng xong trả tiêu điểm về
+  // chỗ cũ. Trước đây tiêu điểm ở lại màn phía sau, Tab đi lạc ra ngoài bảng.
+  const before = document.activeElement;
+  sheetStack.push(sheet);
   requestAnimationFrame(() => {
     backdrop.classList.add('show');
     sheet.classList.add('show');
+    closeBtn.focus?.({ preventScroll: true });
   });
 
   let closed = false;
+  const onKey = (e) => {
+    if (e.key === 'Escape' && sheetStack[sheetStack.length - 1] === sheet) {
+      e.preventDefault?.();
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKey);
   const close = () => {
     if (closed) return;
     closed = true;
+    document.removeEventListener('keydown', onKey);
+    sheetStack.splice(sheetStack.indexOf(sheet), 1);
+    if (before && typeof before.focus === 'function' && document.contains?.(before)) before.focus({ preventScroll: true });
     onClose?.();
     sheet.style.transform = '';
     sheet.classList.remove('show');

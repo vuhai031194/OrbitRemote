@@ -386,3 +386,37 @@ test('ẩn hay chuyển phiên cũ vào thùng rác: lời báo có nút "Hoàn 
     reply = null;
   }
 });
+
+test('bảng trượt: là hộp thoại (aria-modal), tiêu điểm vào nút Đóng, Esc chỉ đóng bảng trên cùng, đóng xong trả tiêu điểm về chỗ cũ', async () => {
+  const { openSheet } = await import('../web/views/sheets.js');
+  if (typeof globalThis.addEventListener !== 'function') define('addEventListener', () => {}); // window = globalThis
+  if (typeof globalThis.removeEventListener !== 'function') define('removeEventListener', () => {});
+  const keyListeners = new Set();
+  const realAdd = document.addEventListener;
+  const realRemove = document.removeEventListener;
+  document.addEventListener = (t, fn) => { if (t === 'keydown') keyListeners.add(fn); };
+  document.removeEventListener = (t, fn) => { if (t === 'keydown') keyListeners.delete(fn); };
+  document.contains = () => true;
+  const opener = new FakeEl('button');
+  let refocused = 0;
+  opener.focus = () => { refocused += 1; };
+  document.activeElement = opener;
+  try {
+    const a = openSheet('Bảng A');
+    const b = openSheet('Bảng B');
+    const sheetA = a.body.parent;
+    assert.equal(sheetA.attrs['aria-modal'], 'true');
+    assert.equal(sheetA.attrs.role, 'dialog');
+    const esc = () => { for (const fn of [...keyListeners]) fn({ key: 'Escape', preventDefault() {} }); };
+    void b;
+    esc();
+    assert.equal(keyListeners.size, 1, 'Esc chỉ đóng bảng trên cùng (B); bảng A vẫn mở');
+    esc();
+    assert.equal(keyListeners.size, 0, 'Esc lần hai đóng A');
+    assert.equal(refocused, 2, 'mỗi lần đóng trả tiêu điểm về chỗ đã mở bảng');
+  } finally {
+    document.addEventListener = realAdd;
+    document.removeEventListener = realRemove;
+    delete document.activeElement;
+  }
+});
