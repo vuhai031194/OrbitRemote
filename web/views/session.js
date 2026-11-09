@@ -11,7 +11,7 @@ import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { actionsFor, runAction } from '../lib/custom.js';
 import { createRenderer } from '../lib/render.js';
-import { STATUS_LABEL } from './home.js';
+import { statusLabel } from './home.js';
 import { openSessionMenu, openSheet, MODES, EFFORTS } from './sheets.js';
 import { modelOptions, sessionModel } from '../lib/models.js';
 import { attachmentIcon, attachmentKind, openAttachment } from './viewer.js';
@@ -143,7 +143,7 @@ export function mountSession(root, id, opts = {}) {
     const rc = ['starting', 'idle', 'busy', 'waiting'].includes(s.status) && s.remoteControl?.on && !s.remoteControl.error ? 'Remote Control' : '';
     subtitle.textContent = [workPlace(s), baseName(workDir(s)), mode, rc].filter(Boolean).join(' · ');
     pill.className = `pill status-${s.status}`;
-    pill.textContent = STATUS_LABEL[s.status] || s.status;
+    pill.textContent = statusLabel(s);
     const machine = store.machines.get(s.machineId);
     // Mở từ màn máy thì nút máy chính là đường quay lại màn đó (không vòng phiên → máy → phiên); còn lại thì màn máy
     // quay lại đúng phiên này, giữ cả đường về nhóm.

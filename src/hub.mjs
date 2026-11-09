@@ -265,6 +265,14 @@ export class Hub extends EventEmitter {
       machine.link = null;
       machine.rpc = null;
       this.push('machine', this.publicMachine(machine));
+      // Phiên của máy có thể vẫn sống trên máy (chỉ đường nối đứt, máy tự nối lại), nên không đổi trạng thái; chỉ đánh
+      // dấu "mất kết nối" để app nói rõ, và danh bạ hay việc gửi tin giữa các phiên khỏi coi chúng đang nhận tin được.
+      // Máy nối lại thì lời chào và trạng thái mới xoá dấu này (upsertSession).
+      for (const r of this.sessions.values()) {
+        if (r.snap.machineId !== machine.id || !RUNNING.has(r.snap.status) || r.snap.offline) continue;
+        r.snap = { ...r.snap, offline: true };
+        this.push('session', this.publicSession(r));
+      }
       this.scheduleSave();
     };
     return { receive, disconnect };
@@ -417,6 +425,7 @@ export class Hub extends EventEmitter {
     let r = this.sessions.get(snap.id);
     const prev = r?.snap || null;
     const merged = { ...(r?.snap || {}), ...snap, machineId: machine.id, machine: machine.alias || machine.name };
+    delete merged.offline; // máy vừa báo về phiên này: đã nối lại (dấu do disconnect đặt)
     // Tên đặt lại trên app thắng tên lúc mở phiên.
     if (r?.snap.renamed) merged.name = r.snap.name;
     if (!r) {
@@ -504,7 +513,7 @@ export class Hub extends EventEmitter {
   // ---- Chuyển tin giữa các phiên -----------------------------------------------
   directory(fromId) {
     return [...this.sessions.values()]
-      .filter((r) => RUNNING.has(r.snap.status))
+      .filter((r) => RUNNING.has(r.snap.status) && !r.snap.offline)
       .map(({ snap }) => ({
         id: snap.id,
         name: snap.name,
@@ -519,7 +528,7 @@ export class Hub extends EventEmitter {
   resolveTargets(fromId, to) {
     const key = String(to || '').trim();
     if (!key) throw new Error('Thiếu người nhận ("to").');
-    const running = [...this.sessions.values()].filter((r) => RUNNING.has(r.snap.status) && r.snap.id !== fromId);
+    const running = [...this.sessions.values()].filter((r) => RUNNING.has(r.snap.status) && !r.snap.offline && r.snap.id !== fromId);
     if (key === '*') return running;
     if (key === '#group') {
       const g = this.groups.groupOf(fromId);

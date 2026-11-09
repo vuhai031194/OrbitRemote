@@ -101,3 +101,33 @@ test('nhắn giữa các phiên: cùng nhóm, được chủ dự án tag, hay t
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('máy mất kết nối: phiên của nó được đánh dấu "mất kết nối" (không đổi trạng thái), danh bạ và việc gửi tin bỏ qua chúng; máy nối lại thì hết dấu', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orbit-offline-'));
+  try {
+    const hub = new Hub({ stateDir: dir });
+    const links = {};
+    const attach = (id) => {
+      links[id] = { close() {}, send() {} };
+      const conn = hub.attachMachine(links[id], {});
+      conn.receive({ op: 'hello', machine: { id, name: `May-${id}`, platform: 'win32' }, sessions: [{ id: `s-${id}`, name: `Phiên ${id}`, status: 'idle' }] });
+      return conn;
+    };
+    const a = attach('mA');
+    attach('mB');
+    const s = () => hub.sessions.get('s-mA').snap;
+    assert.ok(hub.directory('s-mB').some((x) => x.id === 's-mA'));
+
+    a.disconnect();
+    assert.equal(s().status, 'idle', 'phiên có thể vẫn sống trên máy: không đổi trạng thái');
+    assert.equal(s().offline, true);
+    assert.ok(!hub.directory('s-mB').some((x) => x.id === 's-mA'), 'danh bạ bỏ phiên không với tới được');
+    assert.throws(() => hub.resolveTargets('s-mB', 's-mA'), /Không thấy phiên nào đang chạy/);
+
+    attach('mA'); // nối lại: lời chào báo lại phiên
+    assert.equal(s().offline, undefined);
+    assert.ok(hub.directory('s-mB').some((x) => x.id === 's-mA'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

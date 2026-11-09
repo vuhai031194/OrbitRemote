@@ -25,6 +25,10 @@ export const STATUS_LABEL = {
 
 const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
 
+// Nhãn trạng thái của một phiên. Máy của phiên mất kết nối (trạm đặt offline) thì phiên có thể vẫn chạy trên máy,
+// chỉ là không với tới được: nói đúng như vậy thay vì "Sẵn sàng".
+export const statusLabel = (s) => (s?.offline && RUNNING.has(s.status) ? 'Mất kết nối' : STATUS_LABEL[s?.status] || s?.status || '');
+
 // Màn đang mở ở cột phải (bản PC, hai cột): thẻ của nó trong cột trái được đánh dấu.
 // Phiên mở từ màn nhóm hay màn máy mang thêm đuôi /g/<nhóm>, /m/<máy> (đường quay lại).
 export const isOpenSession = (id) => {

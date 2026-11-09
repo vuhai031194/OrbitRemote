@@ -12,7 +12,7 @@ import { createRenderer } from '../lib/render.js';
 import { openSheet, openNewSession, openTranscriptBin } from './sheets.js';
 import { ACTION_DONE, groupByProject, onTranscriptsChange, pastCache, projectBlock, transcriptAction } from '../lib/transcripts.js';
 import { NEW_SESSION_DEFAULTS } from '../lib/custom.js';
-import { STATUS_LABEL } from './home.js';
+import { statusLabel } from './home.js';
 import { claudeAccountBlock } from './claude-login.js';
 import { mountScreenPanel } from './screen.js';
 import { mountSession } from './session.js';
@@ -226,7 +226,7 @@ function sessionRow(s, float) {
     h('span', { class: 'status-dot' }),
     h('span', { class: 'drop-main' },
       h('span', { class: 'drop-name' }, s.name),
-      h('span', { class: 'drop-meta' }, [s.remote?.machine ? `→ ${s.remote.machine}` : '', baseName(workDir(s)), STATUS_LABEL[s.status] || s.status].filter(Boolean).join(' · '))),
+      h('span', { class: 'drop-meta' }, [s.remote?.machine ? `→ ${s.remote.machine}` : '', baseName(workDir(s)), statusLabel(s)].filter(Boolean).join(' · '))),
     h('span', { class: 'drop-time' }, timeAgo(s.lastActivity)));
   if (!float) return row;
   const on = float.id === s.id;
