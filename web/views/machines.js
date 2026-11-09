@@ -184,6 +184,40 @@ function renderControl(el, m) {
     c.what ? h('code', null, ` ${c.what}`) : null, ` · ${clockTime(c.at)}`));
 }
 
+// Nhật ký của Orbit Remote trên máy (src/logs.mjs): xem khi có chuyện mà không phải ngồi tại máy.
+const LOG_TABS = [['hub', 'Trạm'], ['node', 'Đầu máy'], ['setup', 'Setup máy'], ['restart', 'Khởi động lại'], ['ensure', 'Tự chạy lại']];
+function openLogs(m) {
+  const { body } = openSheet(`Nhật ký · ${m.name}`);
+  let name = m.local ? 'hub' : 'node';
+  let turn = 0;
+  const pre = h('pre', { class: 'log-view' }, 'Đang đọc…');
+  const meta = h('div', { class: 'field-hint' });
+  const load = async () => {
+    const mine = ++turn; // đổi tab nhanh: chỉ lần đọc mới nhất được vẽ
+    pre.textContent = 'Đang đọc…';
+    meta.textContent = '';
+    try {
+      const r = await api.get(`/api/machines/${m.id}/logs?name=${name}&lines=300`);
+      if (mine !== turn) return;
+      pre.textContent = r.missing ? 'Máy này chưa có nhật ký này.' : r.text || '(trống)';
+      meta.textContent = r.missing ? '' : `Ghi lần cuối ${timeAgo(r.mtime)} · ${Math.max(1, Math.round(r.size / 1024))} KB, hiện 300 dòng cuối`;
+      pre.scrollTop = pre.scrollHeight;
+    } catch (err) {
+      if (mine === turn) pre.textContent = err.message;
+    }
+  };
+  const tabs = h('div', { class: 'chip-row wrap' }, LOG_TABS.map(([id, label]) => h('button', {
+    class: `chip${id === name ? ' active' : ''}`, type: 'button',
+    onclick: (e) => {
+      name = id;
+      for (const b of tabs.children) b.classList.toggle('active', b === e.currentTarget);
+      load();
+    },
+  }, label)));
+  add(body, tabs, meta, pre, h('button', { class: 'btn small', type: 'button', onclick: load }, 'Đọc lại'));
+  load();
+}
+
 function machineMenu(m) {
   const { body, close } = openSheet(m.name);
   const nameInput = h('input', { class: 'input', value: m.name, maxlength: 40 });
@@ -205,6 +239,7 @@ function machineMenu(m) {
       } }, 'Lưu'))),
     claudeAccountBlock(m),
     controlBlock(m),
+    m.online ? h('button', { class: 'btn block', type: 'button', onclick: () => { close(); openLogs(m); } }, icon('list', 16), 'Xem nhật ký của máy') : null,
     m.local ? h('div', { class: 'field-hint' }, 'Đây là máy giữ trạm.') : h('div', { class: 'danger-row' },
       h('button', { class: 'btn danger-outline block', onclick: async () => {
         if (!window.confirm(`Quên máy "${m.name}"? Máy bị thu hồi quyền nối, và chỉ xin nối lại sau một ngày.`)) return;

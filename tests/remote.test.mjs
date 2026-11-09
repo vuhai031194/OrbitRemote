@@ -1979,3 +1979,13 @@ test('màn khoá/UAC: máy nối vào nhận khoá cấp quyền của trạm; b
     hub.machines.delete('mSec01');
   }
 });
+
+test('xem nhật ký của máy từ app: trạm hỏi đúng máy, máy đọc trong thư mục trạng thái của nó; tên lạ bị từ chối', async () => {
+  const ok = await call('/api/machines/mA/logs?name=hub&lines=20');
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  assert.equal(ok.data.name, 'hub');
+  assert.equal(typeof ok.data.missing, 'boolean');
+  const bad = await call('/api/machines/mA/logs?name=..%2Fauth');
+  assert.notEqual(bad.status, 200);
+  assert.match(JSON.stringify(bad.data), /Không có nhật ký này/);
+});

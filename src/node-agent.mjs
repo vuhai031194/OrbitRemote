@@ -24,6 +24,7 @@ import { Rpc, answer } from './rpc.mjs';
 import { ScreenServer, ffmpegCommand } from './screen.mjs';
 import { GRANT_PUB_STATE, sendSecureGrant } from './secure-desk.mjs';
 import { isGrantKey } from './hub-identity.mjs';
+import { readLogTail } from './logs.mjs';
 import { InputHelper } from './input.mjs';
 import { controlTimeoutMs, remoteOp } from './remote-ops.mjs';
 import { Sensors } from './sensors.mjs';
@@ -477,6 +478,9 @@ export class NodeAgent {
           writeFileSync(GRANT_PUB_STATE, message.grantKey);
           return { ok: true };
         });
+      case 'logs':
+        // Phần cuối một tệp nhật ký của Orbit Remote trên máy này (logs.mjs), để xem từ app.
+        return reply(() => readLogTail(String(message.name || ''), message.lines));
       case 'secure_grant':
         // Quyền bấm màn khoá/UAC trạm vừa ký khi chủ máy bật trên app: đưa thẳng cho chương trình SYSTEM.
         return reply(() => sendSecureGrant(message.payload, message.sig));

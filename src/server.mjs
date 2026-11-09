@@ -451,6 +451,10 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
         return sendJson(res, 200, await hub.transcriptAction(machineId, parts[4], parts[5]));
       }
       if (method === 'GET' && parts[3] === 'dirs') return sendJson(res, 200, await hub.machineDirs(machineId, url.searchParams.get('path') || ''));
+      // Phần cuối một tệp nhật ký của Orbit Remote trên máy (logs.mjs): ?name=hub|node|setup|restart|ensure&lines=200.
+      if (method === 'GET' && parts[3] === 'logs') {
+        return sendJson(res, 200, await hub.machineLogs(machineId, url.searchParams.get('name') || 'hub', url.searchParams.get('lines')));
+      }
       // Cho chương trình SYSTEM của máy bấm màn khoá và hộp thoại UAC trong ít phút (hub.secureGrant).
       if (method === 'POST' && parts[3] === 'secure-grant') {
         const body = await readBody(req);

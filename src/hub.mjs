@@ -1087,6 +1087,15 @@ export class Hub extends EventEmitter {
     }
   }
 
+  async machineLogs(machineId, name, lines) {
+    try {
+      return await this.machineRpc(machineId).request({ op: 'logs', name: String(name || ''), lines: Number(lines) || 200 });
+    } catch (err) {
+      if (/không hiểu lệnh/.test(err.message)) throw new Error('Máy này cần setup bản Orbit Remote mới để xem nhật ký từ app.');
+      throw err;
+    }
+  }
+
   async machineDirs(machineId, path) {
     try {
       return await this.machineRpc(machineId).request({ op: 'dirs', path: String(path || '').slice(0, 1000) });
