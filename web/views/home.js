@@ -11,24 +11,13 @@ import { enrollmentCards } from './machines.js';
 import { isOpenGroup, addToGroup } from './group.js';
 import { externalLine, homeTree } from './tree.js';
 import { searchSessions } from '../lib/search.js';
+import { RUNNING, STATUS_LABEL, statusLabel } from '../lib/labels.js';
 import { enableSessionDrag, isDragging } from '../lib/drag.js';
 import { modelUpdateButton, sessionModel } from '../lib/models.js';
 import { openClaudeLogin } from './claude-login.js';
 
-export const STATUS_LABEL = {
-  starting: 'Đang mở',
-  idle: 'Sẵn sàng',
-  busy: 'Đang làm',
-  waiting: 'Cần duyệt',
-  stopped: 'Đã dừng',
-  crashed: 'Hỏng',
-};
-
-const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
-
-// Nhãn trạng thái của một phiên. Máy của phiên mất kết nối (trạm đặt offline) thì phiên có thể vẫn chạy trên máy,
-// chỉ là không với tới được: nói đúng như vậy thay vì "Sẵn sàng".
-export const statusLabel = (s) => (s?.offline && RUNNING.has(s.status) ? 'Mất kết nối' : STATUS_LABEL[s?.status] || s?.status || '');
+// Nhãn trạng thái: một bảng thuật ngữ chung cho cả app (lib/labels.js). Các màn khác vẫn lấy qua đây như trước.
+export { STATUS_LABEL, statusLabel };
 
 // Màn đang mở ở cột phải (bản PC, hai cột): thẻ của nó trong cột trái được đánh dấu.
 // Phiên mở từ màn nhóm hay màn máy mang thêm đuôi /g/<nhóm>, /m/<máy> (đường quay lại).

@@ -1,9 +1,9 @@
 // Tag phiên trong ô soạn: gõ "@" ở đầu một từ thì xổ bảng chọn phiên (mọi máy, đang chạy hay đã dừng). Trên cùng là ô
-// tìm theo tên (không phân biệt hoa thường, dấu); dưới là từng máy (máy đang bật trước), trong mỗi máy hai nhãn Active
-// và In-Active. Chọn một phiên thì "@" thành "@Tên-phiên " trong ô soạn, và bảng nhớ tag đó trỏ đúng phiên nào; gửi tin
+// tìm theo tên (không phân biệt hoa thường, dấu); dưới là từng máy (máy đang bật trước), trong mỗi máy hai nhãn Đang chạy
+// và Đã dừng. Chọn một phiên thì "@" thành "@Tên-phiên " trong ô soạn, và bảng nhớ tag đó trỏ đúng phiên nào; gửi tin
 // thì app gửi kèm danh sách tag để trạm và đầu máy nói đích danh cho Claude (hub.mjs resolveMentions).
 //
-// Máy và nhãn Active, In-Active thu gọn hay xổ ra được (chạm vào dòng đầu), nhớ cho lần mở sau (localStorage). Lúc
+// Máy và nhãn Đang chạy, Đã dừng thu gọn hay xổ ra được (chạm vào dòng đầu), nhớ cho lần mở sau (localStorage). Lúc
 // đang tìm thì mọi tầng có phiên khớp đều xổ ra, để không có kết quả nào bị giấu; gập lúc tìm chỉ có tác dụng tới khi
 // xoá chữ tìm hay đóng bảng.
 //
@@ -14,11 +14,12 @@ import { h, clear, baseName, workDir } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
 import { store } from '../lib/store.js';
 import { mentionGroups, mentionsIn, tagOf, atWordStart } from '../lib/mention-core.js';
+import { GROUP_RUNNING, GROUP_STOPPED, STATUS_LABEL } from '../lib/labels.js';
 
-const STATUS = { starting: 'Đang mở', idle: 'Sẵn sàng', busy: 'Đang chạy', waiting: 'Chờ duyệt', stopped: 'Đã dừng', crashed: 'Hỏng' };
+const STATUS = STATUS_LABEL; // bảng thuật ngữ chung (lib/labels.js)
 
 // ---- Tầng thu gọn, nhớ cho lần mở sau --------------------------------------------------------------------------
-// Khoá: "m:<máy>" (cả máy), "a:<máy>" (nhãn Active), "i:<máy>" (nhãn In-Active). Chỉ lưu khoá đang thu gọn.
+// Khoá: "m:<máy>" (cả máy), "a:<máy>" (nhãn Đang chạy), "i:<máy>" (nhãn Đã dừng). Chỉ lưu khoá đang thu gọn.
 const STORE_KEY = 'orbit-mention-collapsed';
 const KEYS_MAX = 200;
 const FOLD_MS = 400; // thời gian co giãn (styles.css .fold-body) cộng dư, cho khi không có transitionend
@@ -181,8 +182,8 @@ export function attachMentions(input, { host, selfId = '' }) {
         h('span', { class: 'mention-machine-name' }, g.machine.name),
         h('span', { class: 'group-count' }, String(g.active.length + g.inactive.length)),
       ], [
-        g.active.length ? sub(`a:${id}`, 'Active', g.active) : null,
-        g.inactive.length ? sub(`i:${id}`, 'In-Active', g.inactive) : null,
+        g.active.length ? sub(`a:${id}`, GROUP_RUNNING, g.active) : null,
+        g.inactive.length ? sub(`i:${id}`, GROUP_STOPPED, g.inactive) : null,
       ]));
     }
     if (!items.length) list.append(h('div', { class: 'mention-empty' }, query ? 'Không có phiên nào khớp.' : 'Chưa có phiên nào khác.'));

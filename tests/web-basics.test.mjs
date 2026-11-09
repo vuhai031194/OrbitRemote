@@ -115,3 +115,17 @@ test('tìm phiên: không phân biệt dấu, hoa thường; mọi từ phải k
   assert.deepEqual(ids('trùng'), [], 'phiên ngoài app mà app đang giữ thì không lặp');
   assert.deepEqual(ids('   '), []);
 });
+
+test('thuật ngữ: một bảng chung; không màn nào tự đặt tên trạng thái riêng hay dùng chữ tiếng Anh Active, In-Active', async () => {
+  const { STATUS_LABEL, statusLabel, VERB } = await import('../web/lib/labels.js');
+  assert.equal(STATUS_LABEL.starting, 'Đang khởi động', 'không trùng chữ "đang mở" của phiên mở ngoài app');
+  assert.equal(statusLabel({ status: 'idle', offline: true }), 'Mất kết nối');
+  assert.equal(statusLabel({ status: 'stopped', offline: true }), 'Đã dừng');
+  assert.deepEqual(VERB, { resume: 'Chạy lại', takeOver: 'Tiếp tục ở app', fork: 'Tách nhánh mới' });
+  const { readdirSync } = await import('node:fs');
+  for (const f of readdirSync(join(WEB, 'views'))) {
+    const src = readFileSync(join(WEB, 'views', f), 'utf8');
+    assert.ok(!/'(In-)?Active'/.test(src), `${f}: còn chữ Active/In-Active`);
+    assert.ok(!/waiting: 'Chờ duyệt'|starting: 'Đang mở'/.test(src), `${f}: còn bảng trạng thái riêng`);
+  }
+});

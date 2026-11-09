@@ -12,6 +12,7 @@ import { addToGroup, openRolePicker } from './group.js';
 import { openMoveSheet } from './move.js';
 import { modelOptions, sessionModel } from '../lib/models.js';
 import { groupByProject, onTranscriptsChange, projectBlock, toastDone, transcriptAction } from '../lib/transcripts.js';
+import { VERB } from '../lib/labels.js';
 
 
 export const MODES = [
@@ -564,7 +565,7 @@ export function openNewSession(preset = {}) {
           }
         };
         add(actions,
-          h('button', { class: 'btn small', onclick: () => open(false) }, 'Tiếp tục phiên này'),
+          h('button', { class: 'btn small', onclick: () => open(false) }, VERB.takeOver),
           h('button', { class: 'btn small ghost', onclick: () => open(true) }, 'Tách nhánh mới'),
           h('button', { class: 'btn small ghost', type: 'button', title: 'Thôi hiện trong danh sách, nhật ký giữ nguyên', onclick: (e) => tidy('hide', e.currentTarget) }, icon('eyeoff', 14), 'Ẩn'),
           h('button', { class: 'btn small ghost', type: 'button', title: 'Dời nhật ký vào thùng rác của Orbit Remote, khôi phục được', onclick: (e) => tidy('trash', e.currentTarget) }, icon('trash', 14), 'Thùng rác'),
@@ -777,7 +778,7 @@ export function openSessionMenu(id) {
       danger.append(
         h('button', { class: 'btn primary block', onclick: async () => {
           try { await api.post(`/api/sessions/${id}/resume`); close(); } catch (err) { toast(err.message, 'error'); }
-        } }, icon('play', 16), 'Chạy lại phiên'),
+        } }, icon('play', 16), VERB.resume),
         h('button', { class: 'btn danger-outline block', onclick: async () => {
           if (!window.confirm('Xoá phiên khỏi danh sách? Nhật ký trên máy vẫn còn, mở lại được ở mục "Mở lại phiên cũ".')) return;
           try { await api.post(`/api/sessions/${id}/forget`); close(); location.hash = '#/'; } catch (err) { toast(err.message, 'error'); }

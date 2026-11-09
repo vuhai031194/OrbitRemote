@@ -7,6 +7,7 @@
 
 import { h, add, clear, timeAgo, baseName, toast, clockTime, workDir, workPlace } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
+import { STATUS_LABEL } from '../lib/labels.js';
 import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { renderMarkdown } from '../lib/md.js';
@@ -29,7 +30,7 @@ const TASK_STATUS = { review: 'Chờ nghiệm thu', blocked: 'Bị chặn', doin
 const TASK_ORDER = ['review', 'blocked', 'doing', 'queued', 'todo', 'done'];
 const usd = (n) => `$${(Number(n) || 0).toFixed(2)}`;
 const RUNNING_STATUS = new Set(['starting', 'idle', 'busy', 'waiting']);
-const SESSION_STATUS = { starting: 'Đang mở', idle: 'Sẵn sàng', busy: 'Đang làm', waiting: 'Cần duyệt', stopped: 'Đã dừng', crashed: 'Hỏng' };
+const SESSION_STATUS = STATUS_LABEL; // bảng thuật ngữ chung (lib/labels.js)
 const FEED_MAX = 30;
 
 export const isOpenGroup = (id) => (location.hash || '').startsWith(`#/g/${id}`);
