@@ -64,17 +64,26 @@ export const workDir = (s) => s?.remote?.cwd || s?.cwd || '';
 export const workPlace = (s) => (s?.remote?.machine ? `${s.machine} → ${s.remote.machine}` : s?.machine || '');
 
 let toastTimer = null;
-export function toast(text, kind = 'info') {
+// action: { label, run } thêm một nút trong lời báo (vd. "Hoàn tác"); lời báo có nút thì nằm lâu hơn để kịp bấm.
+export function toast(text, kind = 'info', action = null) {
   const root = document.getElementById('toast-root');
   clear(root);
-  const el = h('div', { class: `toast toast-${kind}` }, text);
+  const el = h('div', { class: `toast toast-${kind}${action ? ' has-action' : ''}` }, h('span', null, text));
+  const hide = () => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 300);
+  };
+  if (action) {
+    el.append(h('button', { class: 'toast-action', type: 'button', onclick: () => {
+      clearTimeout(toastTimer);
+      hide();
+      action.run();
+    } }, action.label));
+  }
   root.append(el);
   requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    el.classList.remove('show');
-    setTimeout(() => el.remove(), 300);
-  }, kind === 'error' ? 5000 : 2600);
+  toastTimer = setTimeout(hide, action ? 6000 : kind === 'error' ? 5000 : 2600);
 }
 
 export async function copyText(text) {

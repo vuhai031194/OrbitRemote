@@ -362,3 +362,27 @@ test('thẻ phiên ở màn chính: duyệt ngay (Cho phép, Từ chối) mà kh
     reply = null;
   }
 });
+
+test('ẩn hay chuyển phiên cũ vào thùng rác: lời báo có nút "Hoàn tác" làm đúng việc ngược lại (bỏ ẩn, khôi phục)', async () => {
+  const { toastDone } = await import('../web/lib/transcripts.js');
+  const root = new FakeEl('div');
+  const realGet = document.getElementById;
+  document.getElementById = () => root;
+  calls.length = 0;
+  reply = () => ({ ok: true });
+  try {
+    for (const [action, back] of [['hide', 'unhide'], ['trash', 'restore']]) {
+      toastDone('m1', csid(3), action);
+      const btn = root.find('toast-action');
+      assert.equal(btn.text(), 'Hoàn tác');
+      btn.listeners.click[0]({});
+      await tick();
+      assert.ok(calls.includes(`/api/machines/m1/transcripts/${csid(3)}/${back}`), `${action} → ${back}`);
+    }
+    toastDone('m1', csid(3), 'restore');
+    assert.equal(root.find('toast-action'), null, 'khôi phục thì không cần hoàn tác');
+  } finally {
+    document.getElementById = realGet;
+    reply = null;
+  }
+});

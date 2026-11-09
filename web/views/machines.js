@@ -10,7 +10,7 @@ import { api } from '../lib/api.js';
 import { store } from '../lib/store.js';
 import { createRenderer } from '../lib/render.js';
 import { openSheet, openNewSession, openTranscriptBin } from './sheets.js';
-import { ACTION_DONE, groupByProject, onTranscriptsChange, pastCache, projectBlock, transcriptAction } from '../lib/transcripts.js';
+import { groupByProject, onTranscriptsChange, pastCache, projectBlock, toastDone, transcriptAction } from '../lib/transcripts.js';
 import { NEW_SESSION_DEFAULTS } from '../lib/custom.js';
 import { statusLabel } from './home.js';
 import { claudeAccountBlock } from './claude-login.js';
@@ -88,7 +88,7 @@ export function openExternalSheet(machineId, t) {
     try {
       await transcriptAction(machineId, t.claudeSessionId, action);
       close();
-      toast(ACTION_DONE[action]);
+      toastDone(machineId, t.claudeSessionId, action);
       if (location.hash.startsWith(`#/x/${machineId}/${t.claudeSessionId}`)) location.hash = `#/m/${machineId}`;
     } catch (err) {
       btn.disabled = false;

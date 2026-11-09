@@ -11,7 +11,7 @@ import { actionsFor, runAction, NEW_SESSION_DEFAULTS } from '../lib/custom.js';
 import { addToGroup, openRolePicker } from './group.js';
 import { openMoveSheet } from './move.js';
 import { modelOptions, sessionModel } from '../lib/models.js';
-import { ACTION_DONE, groupByProject, onTranscriptsChange, projectBlock, transcriptAction } from '../lib/transcripts.js';
+import { groupByProject, onTranscriptsChange, projectBlock, toastDone, transcriptAction } from '../lib/transcripts.js';
 
 
 export const MODES = [
@@ -521,7 +521,7 @@ export function openNewSession(preset = {}) {
           btn.disabled = true;
           try {
             await transcriptAction(machineId, t.claudeSessionId, action);
-            toast(ACTION_DONE[action]);
+            toastDone(machineId, t.claudeSessionId, action);
           } catch (err) {
             btn.disabled = false;
             toast(err.message, 'error');
@@ -612,7 +612,7 @@ export function openTranscriptBin(machineId, view = 'hidden') {
       btn.disabled = true;
       try {
         await transcriptAction(machineId, t.claudeSessionId, action);
-        toast(ACTION_DONE[action]);
+        toastDone(machineId, t.claudeSessionId, action);
         render();
       } catch (err) {
         btn.disabled = false;

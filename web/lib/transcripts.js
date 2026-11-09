@@ -2,7 +2,7 @@
 // chỉ-đọc, gom theo dự án, và các thao tác dọn danh sách (ẩn, thùng rác, bỏ ẩn, khôi phục).
 
 import { api } from './api.js';
-import { h, add, baseName, timeAgo } from './dom.js';
+import { h, add, baseName, timeAgo, toast } from './dom.js';
 import { icon } from './icons.js';
 
 // Phiên cũ đã đọc gần nhất của mỗi máy, để màn xem chỉ-đọc biết tên và thao tác được với phiên vừa chọn.
@@ -21,6 +21,17 @@ export const ACTION_DONE = {
   trash: 'Đã chuyển vào thùng rác. Khôi phục ở mục "Thùng rác" cuối danh sách phiên cũ.',
   restore: 'Đã khôi phục phiên về chỗ cũ.',
 };
+
+// Lời báo sau một thao tác dọn danh sách; ẩn hay chuyển vào thùng rác thì kèm nút "Hoàn tác" (bỏ ẩn, khôi phục),
+// khỏi phải tìm tới mục "Đã ẩn", "Thùng rác" khi lỡ tay.
+const UNDO = { hide: 'unhide', trash: 'restore' };
+export function toastDone(machineId, claudeSessionId, action) {
+  const back = UNDO[action];
+  toast(ACTION_DONE[action] || 'Xong.', 'info', back ? {
+    label: 'Hoàn tác',
+    run: () => transcriptAction(machineId, claudeSessionId, back).then(() => toast(ACTION_DONE[back]), (err) => toast(err.message, 'error')),
+  } : null);
+}
 
 // action: 'hide' | 'unhide' | 'trash' | 'restore'.
 export async function transcriptAction(machineId, claudeSessionId, action) {

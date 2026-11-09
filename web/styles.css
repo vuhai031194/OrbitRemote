@@ -2805,3 +2805,7 @@ html.float-moving, html.float-moving * { cursor: var(--float-cursor, grabbing) !
 /* Ô tìm phiên ở màn chính (home.js). */
 .home-search { width: 100%; margin: 4px 0 10px; min-height: 42px; }
 .search-results { display: flex; flex-direction: column; gap: 8px; }
+
+/* Lời báo có nút (dom.js toast action), như "Hoàn tác" sau khi ẩn hay chuyển phiên cũ vào thùng rác. */
+.toast.has-action { display: flex; align-items: center; gap: 12px; }
+.toast-action { flex: none; min-height: 36px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--accent-cyan); font-weight: 600; cursor: pointer; }
