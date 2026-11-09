@@ -234,3 +234,74 @@ test('gom theo dự án: hai thư mục khác nhau mà trùng tên thì kèm th�
     ['web', '', 1],
   ]);
 });
+
+test('trạm khởi động lại (mã lần chạy đổi): bỏ nhật ký đang giữ, tải lại, báo màn vẽ lại; bản giao diện đổi thì báo tải lại đúng một lần', async () => {
+  reply = () => ({ events: [{ seq: 1, t: 'text', text: 'mới' }], history: [] });
+  const loaded = [];
+  const updates = [];
+  const offs = [store.on('log-loaded', (id) => loaded.push(id)), store.on('update-ready', () => updates.push(1))];
+  try {
+    store.applyState({ boot: 'b1', web: 'w1' });
+    store.logs.set('s9', { history: [], events: [{ seq: 500, t: 'text' }], lastSeq: 500, live: '', loading: false, ready: null });
+    store.applyState({ boot: 'b1', web: 'w1' }); // nối lại trong cùng lần chạy: giữ nhật ký, chỉ lấy bù
+    await tick();
+    assert.equal(store.logs.get('s9').lastSeq, 500);
+    assert.deepEqual(loaded, []);
+
+    store.applyState({ boot: 'b2', web: 'w1' });
+    for (let i = 0; i < 5; i += 1) await tick();
+    assert.deepEqual(loaded, ['s9'], 'màn đang mở được báo vẽ lại');
+    assert.equal(store.logs.get('s9').lastSeq, 1, 'nhật ký đếm theo lần chạy mới');
+    assert.deepEqual(updates, [], 'cùng bản giao diện thì không báo');
+
+    store.applyState({ boot: 'b2', web: 'w2' });
+    store.applyState({ boot: 'b2', web: 'w3' });
+    assert.deepEqual(updates, [1], 'báo một lần');
+  } finally {
+    for (const off of offs) off();
+    reply = null;
+  }
+});
+
+test('luồng sự kiện bị đóng hẳn (cổng app trả 502 khi trạm tắt): tự nối lại, giãn dần, nối được thì đặt lại; trang tự đóng thì thôi', async (t) => {
+  const made = [];
+  class FakeEventSource {
+    constructor(url) { this.url = url; this.readyState = 0; made.push(this); }
+    addEventListener() {}
+    close() { this.readyState = 2; }
+  }
+  FakeEventSource.CLOSED = 2;
+  define('EventSource', FakeEventSource);
+  reply = (path) => (path === '/api/ping' ? { paired: true } : {});
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fail = (es) => { es.readyState = 2; es.onerror(); };
+  try {
+    store.connect();
+    const before = made.length;
+    made.at(-1).readyState = 0;
+    made.at(-1).onerror(); // rớt mạng thường: EventSource tự nối, trang không làm gì thêm
+    t.mock.timers.tick(60000);
+    assert.equal(made.length, before);
+
+    fail(made.at(-1));
+    t.mock.timers.tick(999);
+    assert.equal(made.length, before);
+    t.mock.timers.tick(1);
+    assert.equal(made.length, before + 1, 'nối lại sau 1 giây');
+    fail(made.at(-1));
+    t.mock.timers.tick(1999);
+    assert.equal(made.length, before + 1);
+    t.mock.timers.tick(1);
+    assert.equal(made.length, before + 2, 'lần sau giãn ra 2 giây');
+    made.at(-1).onopen();
+    assert.equal(store.retryMs, 0, 'nối được thì đặt lại nhịp');
+
+    const last = made.at(-1);
+    last.closedByApp = true;
+    fail(last);
+    t.mock.timers.tick(60000);
+    assert.equal(made.length, before + 2, 'trang tự đóng (mất ghép đôi) thì không nối lại');
+  } finally {
+    reply = null;
+  }
+});

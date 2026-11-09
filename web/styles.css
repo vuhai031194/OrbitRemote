@@ -2728,3 +2728,7 @@ html.float-moving, html.float-moving * { cursor: var(--float-cursor, grabbing) !
   from { opacity: 0; transform: translateX(18px) scale(0.98); }
   to { opacity: 1; transform: none; }
 }
+
+/* Thanh "Có bản mới" (app.js showUpdateBar): nổi giữa đáy, trên mọi màn. */
+.update-bar { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 8px 8px 8px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-elevated); color: var(--text); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); font-size: 0.92em; }
+.update-bar > span { min-width: 0; }

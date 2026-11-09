@@ -62,22 +62,54 @@ class Store {
     if (state.hub) this.hub = state.hub;
     if (state.me) this.me = state.me;
     if (state.version) this.version = state.version;
+    // Trạm vừa khởi động lại: số thứ tự sự kiện của mọi phiên đếm lại từ 1, nhật ký đang giữ không nối tiếp được
+    // nữa (hỏi "sau số 500" thì chẳng bao giờ có gì). Bỏ hết, tải lại, báo màn đang mở vẽ lại.
+    const restarted = Boolean(state.boot && this.boot && state.boot !== this.boot);
+    if (state.boot) this.boot = state.boot;
+    // Trạm phát bản giao diện khác bản trang này đang chạy: báo một lần để người dùng tải lại.
+    if (state.web) {
+      if (!this.web) this.web = state.web;
+      else if (state.web !== this.web && !this.updateReady) {
+        this.updateReady = true;
+        this.emit('update-ready');
+      }
+    }
     this.emit('state');
+    if (restarted) {
+      for (const id of [...this.logs.keys()]) {
+        this.logs.delete(id);
+        this.openLog(id, true).catch(() => {});
+      }
+      return;
+    }
     // Nối lại sau khi rớt mạng: lấy bù những sự kiện bị lỡ của các phiên đang mở.
     for (const id of this.logs.keys()) this.syncLog(id);
   }
 
   connect() {
+    clearTimeout(this.retryTimer);
     this.source?.close();
     const source = new EventSource('/api/stream');
     this.source = source;
-    source.onopen = () => this.setConnected(true);
+    source.onopen = () => {
+      this.retryMs = 0;
+      this.setConnected(true);
+    };
     source.onerror = () => {
       this.setConnected(false);
       // Thẻ bị thu hồi thì EventSource cứ nối lại mãi; hỏi trạm một lần để biết thật.
       api.get('/api/ping').then((p) => {
         if (p && !p.paired) window.dispatchEvent(new CustomEvent('orbit:unpaired'));
       }).catch(() => {});
+      // Nhận một câu trả lời lỗi (cổng app của bản PC trả 502 khi trạm đang tắt) thì EventSource đóng hẳn, không tự
+      // nối lại như khi rớt mạng: tự nối, giãn dần tới 30 giây. Trang đã tự đóng nó (mất ghép đôi) thì thôi.
+      if (source.readyState === EventSource.CLOSED && this.source === source && !source.closedByApp) {
+        clearTimeout(this.retryTimer);
+        this.retryMs = this.retryMs ? Math.min(this.retryMs * 2, 30000) : 1000;
+        this.retryTimer = setTimeout(() => {
+          if (this.source === source && !source.closedByApp) this.connect();
+        }, this.retryMs);
+      }
     };
     const on = (type, fn) => source.addEventListener(type, (e) => fn(JSON.parse(e.data)));
     on('state', (s) => this.applyState(s));

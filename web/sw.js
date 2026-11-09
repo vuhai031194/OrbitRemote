@@ -3,7 +3,7 @@
 // Luôn hỏi mạng trước (app hay đổi, và trạm luôn có bản mới nhất); chỉ khi không với tới
 // trạm mới lấy bản đã lưu. Không bao giờ lưu API hay luồng sự kiện: đó là dữ liệu sống.
 
-const CACHE = 'orbit-remote-shell-v35';
+const CACHE = 'orbit-remote-shell-v36';
 const SHELL = [
   '/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icons/icon-180.png', '/icons/icon-192.png',
   '/lib/api.js', '/lib/dom.js', '/lib/icons.js', '/lib/md.js', '/lib/store.js', '/lib/custom.js', '/lib/render.js', '/lib/qr.js',
@@ -38,6 +38,9 @@ self.addEventListener('fetch', (event) => {
         }
         return res;
       })
-      .catch(() => caches.match(event.request, { ignoreSearch: true }).then((hit) => hit || caches.match('/'))),
+      // Trang chỉ được thay bằng "/" khi chính nó là trang (mở app lúc mất mạng); một file JS hay CSS thiếu mà nhận
+      // về HTML thì trình duyệt báo lỗi khó hiểu.
+      .catch(() => caches.match(event.request, { ignoreSearch: true })
+        .then((hit) => hit || (event.request.mode === 'navigate' ? caches.match('/') : Response.error()))),
   );
 });

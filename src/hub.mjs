@@ -10,6 +10,7 @@
 // Lớp HTTP (server.mjs) chỉ dịch yêu cầu của app thành lời gọi vào đây, và nghe sự kiện
 // `push` để đẩy ra cho mọi app đang mở.
 
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { STATE_DIR, readJson, writeJsonAtomic } from './paths.mjs';
@@ -107,6 +108,9 @@ function pick(obj, fields) {
 export class Hub extends EventEmitter {
   constructor({ stateDir = STATE_DIR } = {}) {
     super();
+    // Mã của lần chạy này. Số thứ tự sự kiện của mọi phiên đếm lại từ 1 mỗi lần trạm khởi động, nên app thấy mã đổi
+    // thì phải bỏ nhật ký đang giữ mà tải lại (web/lib/store.js applyState), không thì nó chờ mãi số cũ.
+    this.bootId = randomBytes(6).toString('hex');
     this.file = join(stateDir, 'hub.json');
     this.machines = new Map(); // machineId -> { id, name, platform, online, link, rpc, lastSeen }
     this.sessions = new Map(); // sessionId -> bản ghi phiên
@@ -203,6 +207,7 @@ export class Hub extends EventEmitter {
 
   state() {
     return {
+      boot: this.bootId,
       machines: [...this.machines.values()].map((m) => this.publicMachine(m)),
       sessions: [...this.sessions.values()].map((r) => this.publicSession(r)),
       channel: this.channel.slice(-100),

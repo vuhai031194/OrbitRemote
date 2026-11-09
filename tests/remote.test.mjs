@@ -234,6 +234,16 @@ test('trạm: chặn khi chưa ghép đôi, ghép đôi, mở phiên, luồng SS
   assert.equal(hub.sessions.get(id).snap.claudeSessionId, created.data.claudeSessionId, 'nối lại đúng phiên Claude cũ');
 });
 
+test('trạng thái mang mã lần chạy của trạm và dấu bản giao diện, cả ở luồng sự kiện (app dựa vào đó để tải lại)', async () => {
+  const st = await call('/api/state');
+  assert.match(st.data.boot, /^[0-9a-f]{12}$/);
+  assert.match(st.data.web, /^[0-9a-f]{12}$/);
+  const first = sse.find((e) => e.type === 'state');
+  assert.equal(first.data.boot, st.data.boot);
+  assert.equal(first.data.web, st.data.web);
+  assert.equal(first.data.version, st.data.version);
+});
+
 test('mở lại phiên cũ mà app đã giữ: dùng lại đúng bản ghi đó, không dựng bản ghi thứ hai; chạy lại khi phiên Claude đang chạy ở mục khác thì từ chối', async () => {
   // Có một lượt để phiên có nhật ký: Claude Code (và bản giả) không nối tiếp được phiên chưa có nhật ký.
   const created = await call('/api/sessions', { machineId: 'mA', name: 'Mở lại', cwd: WORK, prompt: 'hello' });

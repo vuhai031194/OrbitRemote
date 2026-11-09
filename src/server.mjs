@@ -9,10 +9,33 @@
 // và cookie đặt SameSite=Lax.
 
 import http from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize, sep } from 'node:path';
+import { extname, join, normalize, relative, sep } from 'node:path';
 import { CUSTOM_DIR, WEB_DIR, writeJsonAtomic } from './paths.mjs';
+
+// Dấu của bản giao diện trạm đang phát: băm nội dung mọi file trong web/ lúc trạm khởi động. Số phiên bản trong
+// package.json ít khi đổi, còn dấu này đổi theo đúng từng lần sửa giao diện.
+function webBuild(dir = WEB_DIR) {
+  const hash = createHash('sha1');
+  const walk = (d) => {
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile()) hash.update(relative(dir, full)).update('\0').update(readFileSync(full)).update('\0');
+    }
+  };
+  walk(dir);
+  return hash.digest('hex').slice(0, 12);
+}
+const WEB_BUILD = webBuild();
 import { listTokens } from './tokens.mjs';
 import { modelsView } from './models.mjs';
 
@@ -152,7 +175,8 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
   const appClients = new Set();
   const nodeLinks = new Map(); // linkId -> { receive, disconnect }
 
-  const fullState = () => ({ ...hub.state(), enrollments: auth.pendingEnrollments(), hub: hubInfo() });
+  // version, web: cả luồng sự kiện cũng mang, để trang đang mở biết trạm đã chạy bản giao diện khác mà báo tải lại.
+  const fullState = () => ({ ...hub.state(), enrollments: auth.pendingEnrollments(), hub: hubInfo(), version, web: WEB_BUILD });
   // Nguồn trang app được phép gọi thêm: cổng màn hình của các máy (điện thoại nối thẳng tới máy bằng
   // WebSocket khi xem màn hình).
   const pageConnect = () => hub.screenSources().filter(Boolean).join(' ');

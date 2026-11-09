@@ -213,6 +213,16 @@ function route() {
   store.emit('route', hash); // cột trái đánh dấu máy hay phiên đang mở
 }
 
+// Trạm đang phát bản giao diện mới hơn bản trang này: một thanh nhỏ mời tải lại (không tự tải, kẻo mất chữ đang gõ).
+function showUpdateBar() {
+  if (document.querySelector('.update-bar')) return;
+  const bar = h('div', { class: 'update-bar', role: 'status' },
+    h('span', {}, 'Có bản mới của Orbit Remote.'),
+    h('button', { class: 'btn small primary', type: 'button', onclick: () => location.reload() }, 'Tải lại'),
+    h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Để sau', title: 'Để sau', onclick: () => bar.remove() }, '×'));
+  document.body.append(bar);
+}
+
 let started = false;
 async function start() {
   const state = await api.get('/api/state');
@@ -222,6 +232,7 @@ async function start() {
     window.addEventListener('hashchange', route);
     wide?.addEventListener?.('change', route); // kéo cửa sổ hẹp lại hay rộng ra: đổi giữa một và hai cột
     store.on('open-new-session', (preset) => openNewSession(preset));
+    store.on('update-ready', showUpdateBar);
     store.connect();
     store.loadActions();
     store.loadTokens();
@@ -240,6 +251,7 @@ async function boot() {
   trackViewport();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   window.addEventListener('orbit:unpaired', () => {
+    if (store.source) store.source.closedByApp = true; // đừng tự nối lại (store.js connect)
     store.source?.close();
     showPairing();
   });
