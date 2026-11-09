@@ -34,8 +34,13 @@ export function startDiscoveryResponder({ port, info }) {
   // Không có quyền nghe UDP (tường lửa, cổng bận) thì chỉ mất đường dò trong mạng nhà, trạm
   // vẫn chạy. Mọi lỗi ở đây đều phải nuốt: một ngoại lệ lọt ra là sập cả trạm.
   socket.on('error', close);
+  // ready: xong khi đã nghe cổng (hay thôi vì lỗi), để ai cần biết chắc thì chờ (phép kiểm).
+  const ready = new Promise((resolve) => {
+    socket.once('listening', resolve);
+    socket.once('close', resolve);
+  });
   socket.bind(port);
-  return { close };
+  return { close, ready };
 }
 
 // ---- Phía đầu máy -------------------------------------------------------------------

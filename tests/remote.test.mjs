@@ -1011,12 +1011,16 @@ test('dò tìm: trạm trả lời gói UDP hỏi, và nhận ra trạm qua đ�
   const dgram = await import('node:dgram');
   const udpPort = 40000 + Math.floor(Math.random() * 20000);
   const responder = startDiscoveryResponder({ port: udpPort, info: () => ({ hubId: 'hubX', hubName: 'TramThu', urls: ['https://x.example'] }) });
-  await new Promise((r) => setTimeout(r, 100));
+  // Chờ bên trả lời nghe cổng thật (máy CI chậm thì 100 ms chưa đủ), và gửi lại vài lần: gói UDP có thể rớt, đúng như
+  // ngoài đời (một lần gửi trong CI từng không có trả lời).
+  await responder.ready;
   const reply = await new Promise((resolve, reject) => {
     const s = dgram.createSocket('udp4');
-    const timer = setTimeout(() => { s.close(); reject(new Error('không có trả lời UDP')); }, 2000);
-    s.on('message', (msg) => { clearTimeout(timer); s.close(); resolve(JSON.parse(msg.toString())); });
-    s.send(Buffer.from('orbit-remote:discover'), udpPort, '127.0.0.1');
+    const ask = () => s.send(Buffer.from('orbit-remote:discover'), udpPort, '127.0.0.1');
+    const again = setInterval(ask, 250);
+    const timer = setTimeout(() => { clearInterval(again); s.close(); reject(new Error('không có trả lời UDP')); }, 5000);
+    s.on('message', (msg) => { clearTimeout(timer); clearInterval(again); s.close(); resolve(JSON.parse(msg.toString())); });
+    ask();
   });
   responder.close();
   assert.equal(reply.service, 'orbit-remote');
