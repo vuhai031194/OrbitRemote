@@ -34,6 +34,8 @@ const DELTA_FLUSH_MS = 60; // gộp từng mẩu chữ đang chảy để không
 const SAVE_DELAY_MS = 1500;
 const SAVE_RETRY_MS = 5000;
 const SEEN_EIDS_MAX = 5000;
+const BUFFER_KEEP_MS = 60 * 60 * 1000; // phiên dừng quá chừng này thì bỏ bộ đệm sự kiện (pruneIdleBuffers)
+const PRUNE_EVERY_MS = 10 * 60 * 1000;
 const CONTACTS_MAX = 50; // số phiên một phiên được nhắn cho (ngoài nhóm), giữ những phiên mới cho phép gần nhất
 const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
 
@@ -114,6 +116,8 @@ export class Hub extends EventEmitter {
     // Mã của lần chạy này. Số thứ tự sự kiện của mọi phiên đếm lại từ 1 mỗi lần trạm khởi động, nên app thấy mã đổi
     // thì phải bỏ nhật ký đang giữ mà tải lại (web/lib/store.js applyState), không thì nó chờ mãi số cũ.
     this.bootId = randomBytes(6).toString('hex');
+    this.pruneTimer = setInterval(() => this.pruneIdleBuffers(), PRUNE_EVERY_MS);
+    this.pruneTimer.unref?.();
     this.file = join(stateDir, 'hub.json');
     this.machines = new Map(); // machineId -> { id, name, platform, online, link, rpc, lastSeen }
     this.sessions = new Map(); // sessionId -> bản ghi phiên
@@ -1243,6 +1247,21 @@ export class Hub extends EventEmitter {
     } catch {
       r.history = null;
     }
+  }
+
+  // Phiên đã dừng lâu: bỏ bộ đệm sự kiện và lịch sử đã nạp; mở lại thì nạp lại từ nhật ký Claude Code (events()).
+  // Trạm chạy nhiều tuần mà giữ đủ bộ đệm của mọi phiên từng mở (tới 600 sự kiện, mỗi cái tới 20 KB) thì bộ nhớ cứ phình.
+  pruneIdleBuffers(now = Date.now()) {
+    let n = 0;
+    for (const r of this.sessions.values()) {
+      if (RUNNING.has(r.snap.status) || (!r.buffer.length && !r.history)) continue;
+      const at = Date.parse(r.snap.lastActivity || r.snap.createdAt || '') || 0;
+      if (now - at < BUFFER_KEEP_MS) continue;
+      r.buffer = [];
+      r.history = null;
+      n += 1;
+    }
+    return n;
   }
 
   async events(id, after = 0) {

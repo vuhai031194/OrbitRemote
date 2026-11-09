@@ -52,6 +52,20 @@ const SEND_LIMIT = 16 * 1024 * 1024;
 const NODE_PUSH_LIMIT = 16 * 1024 * 1024;
 const ATTACH_MAX = 8;
 const SSE_PING_MS = 20000;
+export const SSE_BACKLOG_MAX = 2 * 1024 * 1024; // tin dồn chờ gửi cho một app quá chừng này thì cắt kết nối (app tự nối lại)
+
+// Gửi một tin cho mọi app đang nghe luồng sự kiện. Điện thoại mất sóng mà kết nối chưa đứt hẳn thì mọi tin dồn trong
+// bộ nhớ trạm: quá SSE_BACKLOG_MAX thì cắt kết nối đó; app tự nối lại và nhận trạng thái đầy đủ (store.js).
+export function pushFrame(clients, frame, max = SSE_BACKLOG_MAX) {
+  for (const res of clients) {
+    if (res.writableLength > max) {
+      clients.delete(res);
+      res.destroy();
+      continue;
+    }
+    res.write(frame);
+  }
+}
 // Tệp đính kèm mở lại trên app. Chỉ loại trình duyệt tự hiện mà không chạy mã mới mở tại chỗ; mọi loại
 // chữ (kể cả html, svg) trả về dạng chữ trơn; loại khác chỉ cho tải về.
 const ATTACH_TYPES = {
@@ -204,8 +218,7 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
 
   hub.on('push', (type, data) => {
     if (!appClients.size) return;
-    const frame = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const res of appClients) res.write(frame);
+    pushFrame(appClients, `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
   });
 
   const broadcast = (type, data) => hub.push(type, data);

@@ -10,7 +10,7 @@
 // đích → được bơm thẳng vào phiên đích như một lượt mới.
 
 import net from 'node:net';
-import { existsSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open as openFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
@@ -43,6 +43,8 @@ const EXTERNAL_SCAN_MS = 20000;
 const EXTERNAL_WINDOW_MS = 15 * 60 * 1000;
 const EXTERNAL_MAX = 20;
 const PENDING_MAX = 2000; // sự kiện giữ lại lúc mất nối trạm (keepForLater)
+const UPLOAD_KEEP_MS = 14 * 24 * 3600 * 1000; // tệp đính kèm của phiên không còn chạy, lâu không đụng tới thì dọn
+const SWEEP_MS = 6 * 3600 * 1000;
 const POWER_STALE_MS = 60 * 1000; // lịch tắt quá giờ một phút mà máy vẫn chạy: đã bị huỷ trên máy
 const TOKEN_PUSH_MS = 5 * 60 * 1000; // máy tự báo số token Claude Code của tuần lên trạm (khi số đổi)
 const WEEK_MS = 7 * 24 * 3600 * 1000;
@@ -171,8 +173,51 @@ export class NodeAgent {
   // ---- Phiên đang mở ngoài app (VS Code, terminal) --------------------------------
   // Chỉ báo lên trạm khi danh sách đổi, nên quét 20 giây một lần cũng gần như không tốn gì:
   // mỗi lượt là một lần liệt kê thư mục và đọc lại đúng những file vừa được ghi.
+  // Dọn đồ thừa trong thư mục trạng thái: cấu hình MCP của phiên không còn chạy (trạm hay đầu máy sập giữa chừng thì
+  // sót lại), tệp đính kèm của phiên không còn chạy và đã lâu không đụng tới (UPLOAD_KEEP_MS).
+  sweepStale(now = Date.now()) {
+    const running = new Set(this.sessions.keys());
+    const removed = { mcp: 0, uploads: 0 };
+    const list = (dir) => {
+      try {
+        return readdirSync(dir);
+      } catch {
+        return [];
+      }
+    };
+    const mcpDir = join(this.stateDir, 'mcp');
+    for (const name of list(mcpDir)) {
+      if (!name.endsWith('.json') || running.has(name.slice(0, -5))) continue;
+      try {
+        unlinkSync(join(mcpDir, name));
+        removed.mcp += 1;
+      } catch {
+        // đang bị giữ: lần sau
+      }
+    }
+    const upDir = join(this.stateDir, 'uploads');
+    for (const id of list(upDir)) {
+      if (running.has(id)) continue;
+      const dir = join(upDir, id);
+      let newest = 0;
+      try {
+        newest = statSync(dir).mtimeMs;
+        for (const f of readdirSync(dir)) newest = Math.max(newest, statSync(join(dir, f)).mtimeMs);
+      } catch {
+        continue;
+      }
+      if (now - newest < UPLOAD_KEEP_MS) continue;
+      rmSync(dir, { recursive: true, force: true });
+      removed.uploads += 1;
+    }
+    return removed;
+  }
+
   startScanning(intervalMs = EXTERNAL_SCAN_MS) {
     if (this.scanTimer) return;
+    this.sweepStale();
+    this.sweepTimer = setInterval(() => this.sweepStale(), SWEEP_MS);
+    this.sweepTimer.unref?.();
     this.scanTimer = setInterval(() => {
       this.scanExternal();
       this.scanSetup();
@@ -826,6 +871,7 @@ export class NodeAgent {
 
   shutdown() {
     if (this.scanTimer) clearInterval(this.scanTimer);
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
     if (this.tokenTimer) clearInterval(this.tokenTimer);
     for (const s of this.sessions.values()) s.close();
     this.pipeServer?.close();
