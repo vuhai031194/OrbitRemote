@@ -39,7 +39,7 @@ import { isPrivate } from './netaddr.mjs';
 import { findTailscale, readTailscaleStatus, tailnetFromStatus, tailnetUrls } from './tailnet.mjs';
 import { APP_PROFILE_DIR, openAppWindow } from './pc-app.mjs';
 import { pullRepo, runSetup } from './setup.mjs';
-import { spawnMain } from './launch.mjs';
+import { crashDecision, spawnMain, spawnMainLater } from './launch.mjs';
 import { REPO_HUB, publishRepoHub, repoHub, repoHubUrls } from './hub-decl.mjs';
 
 const VERSION = readJson(join(TOOL_DIR, 'package.json'), {}).version || '0';
@@ -71,6 +71,40 @@ function saveConfig(patch) {
 function log(text) {
   const t = new Date().toLocaleString('vi-VN', { hour12: false });
   process.stdout.write(`[${t}] ${text}\n`);
+}
+
+const CRASH_FILE = join(STATE_DIR, 'crashes.json');
+
+// Lỗi không ai bắt. Promise lỗi: chỉ ghi log (mặc định Node làm sập cả tiến trình, kéo theo mọi phiên của máy).
+// Lỗi đồng bộ: trạng thái có thể đã dở dang nên ghi log, lưu được gì thì lưu, thoát, rồi tự chạy lại sau 5 giây
+// ("ensure" dựng lại trạm hay đầu máy theo vai của máy), trừ khi đã sập liên tục (launch.mjs crashDecision).
+function guardProcess(role, save = () => {}) {
+  process.on('unhandledRejection', (err) => log(`[lỗi] ${role}: promise lỗi không ai bắt: ${err?.stack || err}`));
+  process.on('uncaughtException', (err) => {
+    log(`[lỗi] ${role} gặp lỗi không bắt được: ${err?.stack || err}`);
+    try {
+      save();
+    } catch {
+      // đang sập: lưu được tới đâu hay tới đó
+    }
+    const { times, respawn } = crashDecision(readJson(CRASH_FILE, {})?.times);
+    try {
+      writeJsonAtomic(CRASH_FILE, { times });
+    } catch {
+      // không ghi được sổ sập: vẫn tự chạy lại theo số đếm trong lần này
+    }
+    if (respawn) {
+      log('Tự chạy lại sau 5 giây.');
+      try {
+        spawnMainLater(['ensure'], 'ensure.log', 5000);
+      } catch {
+        // không dựng được: lần đăng nhập sau autostart dựng lại
+      }
+    } else {
+      log(`Đã sập ${times.length} lần trong 10 phút: thôi tự chạy lại. Xem log này, sửa rồi chạy run.cmd.`);
+    }
+    process.exit(1);
+  });
 }
 
 function localSecret(create) {
@@ -174,6 +208,10 @@ async function runHub() {
   writeJsonAtomic(ROLE_FILE, { role: 'hub', since: new Date().toISOString() });
   const auth = new Auth();
   const hub = new Hub();
+  guardProcess('trạm', () => {
+    hub.saveNow();
+    auth.flushLastSeen();
+  });
   const secret = localSecret(true);
   const identity = machineIdentity();
 
@@ -260,6 +298,7 @@ async function runNode() {
     log('Orbit Remote đang bị tắt trên máy này (node src/main.mjs enable để bật lại).');
     return;
   }
+  guardProcess('đầu máy');
   const cfg = config();
   const agent = new NodeAgent({
     claudeCommand: cfg.claudeCommand,

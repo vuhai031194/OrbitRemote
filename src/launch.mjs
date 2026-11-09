@@ -33,3 +33,28 @@ export function spawnMain(args, logName) {
   spawn(process.execPath, [MAIN_SCRIPT, ...args], { detached: true, windowsHide: true, stdio: ['ignore', out, out], env }).unref();
   return logFile;
 }
+
+// Như spawnMain nhưng chờ `delayMs` rồi mới chạy, để tiến trình gọi (vừa sập) kịp thoát và nhả cổng. Một tiến trình
+// node nhỏ tách riêng giữ hẹn giờ, rồi dựng lệnh thật cũng tách riêng.
+export function spawnMainLater(args, logName, delayMs) {
+  ensureDir(STATE_DIR);
+  const logFile = join(STATE_DIR, logName);
+  rotateLog(logFile);
+  const out = openSync(logFile, 'a');
+  const env = childEnv();
+  delete env.ORBIT_SESSION_SYNC_OFF;
+  const argv = JSON.stringify([MAIN_SCRIPT, ...args]);
+  const code = `setTimeout(() => require('node:child_process').spawn(process.execPath, ${argv}, { detached: true, windowsHide: true, stdio: 'inherit' }).unref(), ${Math.max(0, Number(delayMs) || 0)});`;
+  spawn(process.execPath, ['-e', code], { detached: true, windowsHide: true, stdio: ['ignore', out, out], env }).unref();
+  return logFile;
+}
+
+// Tự chạy lại sau khi sập, trừ khi sập liên tục (lỗi nằm ở code hay ở máy: chạy lại chỉ sập tiếp, lấp mất log).
+// times: các lần sập trước (mili giây). Trả danh sách mới để lưu và có nên tự chạy lại không.
+export const CRASH_WINDOW_MS = 10 * 60 * 1000;
+export const CRASH_MAX = 3;
+export function crashDecision(times, now = Date.now()) {
+  const recent = (Array.isArray(times) ? times : []).filter((t) => Number.isFinite(t) && t <= now && now - t < CRASH_WINDOW_MS);
+  recent.push(now);
+  return { times: recent, respawn: recent.length <= CRASH_MAX };
+}

@@ -9,7 +9,7 @@
 
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
-import { STATE_DIR, readJson, writeJsonAtomic } from './paths.mjs';
+import { STATE_DIR, readStateJson, writeJsonAtomic } from './paths.mjs';
 
 const AUTH_FILE = join(STATE_DIR, 'auth.json');
 const PAIR_TTL_MS = 10 * 60 * 1000;
@@ -25,7 +25,11 @@ const hash = (token) => createHash('sha256').update(token).digest('hex');
 export class Auth {
   constructor(file = AUTH_FILE) {
     this.file = file;
-    this.data = readJson(file, { devices: [] });
+    // auth.json hỏng mà coi như trống thì mọi thiết bị và máy đã ghép thành "chưa ghép" (máy khác còn tự dừng 24 giờ):
+    // cất bản hỏng, nạp bản dự phòng (paths.mjs readStateJson).
+    const { value, from, corrupt } = readStateJson(file, { devices: [] });
+    if (corrupt) console.error(`[trạm] ${file} hỏng, đã cất sang ${corrupt}; ${from === 'bak' ? 'nạp bản dự phòng .bak' : 'không có bản dự phòng: mọi thiết bị phải ghép lại'}.`);
+    this.data = value && Array.isArray(value.devices) ? value : { devices: [] };
     this.byHash = new Map(this.data.devices.map((d) => [d.tokenHash, d]));
     this.pairCodes = new Map(); // mã -> thời điểm hết hạn
     this.pairFails = 0;
@@ -53,7 +57,7 @@ export class Auth {
   }
 
   save() {
-    writeJsonAtomic(this.file, this.data);
+    writeJsonAtomic(this.file, this.data, { backup: true });
   }
 
   prunePairCodes() {
@@ -202,10 +206,15 @@ export class Auth {
   }
 
   // Ghi lần thấy cuối theo lô, không ghi đĩa ở mỗi yêu cầu.
+  // Chạy từ bộ hẹn giờ mỗi phút: lỗi ghi đĩa ở đây không được làm sập trạm, để lần sau ghi lại.
   flushLastSeen() {
     if (!this.lastSeenDirty) return;
-    this.lastSeenDirty = false;
-    this.save();
+    try {
+      this.save();
+      this.lastSeenDirty = false;
+    } catch (err) {
+      console.error(`[trạm] không lưu được ${this.file}: ${err.message}. Thử lại sau.`);
+    }
   }
 }
 

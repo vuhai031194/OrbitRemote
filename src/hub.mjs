@@ -13,7 +13,7 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
-import { STATE_DIR, readJson, writeJsonAtomic } from './paths.mjs';
+import { STATE_DIR, readJson, readStateJson, writeJsonAtomic } from './paths.mjs';
 import { Rpc } from './rpc.mjs';
 import { normalizeMac, sameSubnet } from './wake.mjs';
 import { MAX_DELAY_SEC } from './power.mjs';
@@ -32,6 +32,7 @@ const PENDING_RESTORE_MS = 1500; // chờ sự kiện xin quyền tới trước
 const MENTIONS_MAX = 20; // số phiên được tag tối đa trong một tin
 const DELTA_FLUSH_MS = 60; // gộp từng mẩu chữ đang chảy để không bắn một gói cho mỗi token
 const SAVE_DELAY_MS = 1500;
+const SAVE_RETRY_MS = 5000;
 const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
 
 // So đường dẫn tệp app xin với lời của phiên (readSessionFile): bỏ khác biệt \ và /, hoa thường, và mã %XX của
@@ -131,7 +132,9 @@ export class Hub extends EventEmitter {
 
   // ---- Lưu và nạp -----------------------------------------------------------
   load() {
-    const saved = readJson(this.file, null);
+    const { value: saved, from, corrupt } = readStateJson(this.file, null);
+    if (corrupt) console.error(`[trạm] ${this.file} hỏng, đã cất sang ${corrupt}; ${from === 'bak' ? 'nạp bản dự phòng .bak' : 'không có bản dự phòng, bắt đầu trống'}.`);
+    else if (from === 'bak') console.error(`[trạm] không thấy ${this.file}, nạp bản dự phòng .bak.`);
     if (!saved) return;
     this.recents = saved.recents || {};
     this.controlGrants = saved.controlGrants && typeof saved.controlGrants === 'object' ? saved.controlGrants : {};
@@ -156,18 +159,29 @@ export class Hub extends EventEmitter {
     this.saveTimer.unref?.();
   }
 
+  // Lưu chạy từ bộ hẹn giờ: ném lỗi ở đây (Windows báo file đang bị giữ, đĩa đầy) là làm sập cả trạm cùng mọi
+  // phiên của máy này. Ghi lỗi rồi thử lại sau, trạng thái trong bộ nhớ vẫn đủ.
   saveNow() {
-    writeJsonAtomic(this.file, {
-      sessions: [...this.sessions.values()].map((r) => pick(r.snap, META_FIELDS)),
-      machines: [...this.machines.values()].map((m) => ({
-        id: m.id, name: m.name, alias: m.alias, platform: m.platform, lastSeen: m.lastSeen, firstSeen: m.firstSeen, local: m.local,
-        screen: m.screen || undefined,
-        wake: m.wake?.length ? m.wake : undefined, // card mạng: để bật lại máy khi nó đã tắt
-      })),
-      recents: this.recents,
-      groups: this.groups.toJSON(),
-      controlGrants: this.controlGrants,
-    });
+    try {
+      writeJsonAtomic(this.file, {
+        sessions: [...this.sessions.values()].map((r) => pick(r.snap, META_FIELDS)),
+        machines: [...this.machines.values()].map((m) => ({
+          id: m.id, name: m.name, alias: m.alias, platform: m.platform, lastSeen: m.lastSeen, firstSeen: m.firstSeen, local: m.local,
+          screen: m.screen || undefined,
+          wake: m.wake?.length ? m.wake : undefined, // card mạng: để bật lại máy khi nó đã tắt
+        })),
+        recents: this.recents,
+        groups: this.groups.toJSON(),
+        controlGrants: this.controlGrants,
+      }, { backup: true });
+      return true;
+    } catch (err) {
+      console.error(`[trạm] không lưu được ${this.file}: ${err.message}. Thử lại sau ${SAVE_RETRY_MS / 1000} giây.`);
+      clearTimeout(this.saveRetry);
+      this.saveRetry = setTimeout(() => this.scheduleSave(), SAVE_RETRY_MS);
+      this.saveRetry.unref?.();
+      return false;
+    }
   }
 
   newRecord(snap) {
