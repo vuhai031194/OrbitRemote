@@ -181,10 +181,11 @@ function readFirewall() {
   const r = powershell(String.raw`
 $allow = @(Get-NetFirewallRule -Name 'OrbitRemote-*' -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' } | ForEach-Object { $_.Name })
 $block = @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | Where-Object { $_.Program -like '*\node.exe' } | Get-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' } | ForEach-Object { $_.Name })
-ConvertTo-Json -InputObject @{ allow = $allow; block = $block } -Compress`);
+$open = @(Get-NetFirewallRule -Name 'OrbitRemote-*' -ErrorAction SilentlyContinue | Where-Object { @(($_ | Get-NetFirewallAddressFilter).RemoteAddress) -contains 'Any' } | ForEach-Object { $_.Name })
+ConvertTo-Json -InputObject @{ allow = $allow; block = $block; open = $open } -Compress`);
   try {
     const v = JSON.parse(r.stdout);
-    return { allow: [].concat(v.allow || []), block: [].concat(v.block || []) };
+    return { allow: [].concat(v.allow || []), block: [].concat(v.block || []), open: [].concat(v.open || []) };
   } catch {
     return null;
   }
@@ -216,12 +217,18 @@ ConvertTo-Json -InputObject @{ wired = $wired; fastStartup = $hib } -Depth 4 -Co
 
 // Lệnh PowerShell (chạy với quyền quản trị) mở các cổng của Orbit Remote cho mọi loại mạng, và tắt
 // (không xoá) các luật đang chặn node.exe: muốn chặn lại thì bật lại được ngay trong tường lửa.
+// Ai được gọi tới các cổng của Orbit: máy cùng mạng nội bộ (LocalSubnet) và máy trong mạng Tailscale (dải IPv4
+// 100.64.0.0/10, IPv6 fd7a:115c:a1e0::/48). Mở cho mọi địa chỉ (Any) thì ở Wi-Fi công cộng hay khi máy có IP công
+// khai, bất kỳ ai trên Internet cũng chạm tới được các đường không cần thẻ (dò trạm, xin nối, ghép đôi).
+export const FIREWALL_REMOTE = ['LocalSubnet', '100.64.0.0/10', 'fd7a:115c:a1e0::/48'];
+
 export function firewallScript(ctx, blockNames = []) {
   const lines = ["$ErrorActionPreference = 'Stop'"];
+  const remote = FIREWALL_REMOTE.map(q).join(',');
   for (const name of blockNames) lines.push(`Disable-NetFirewallRule -Name ${q(name)}`);
   for (const r of firewallRules(ctx)) {
-    lines.push(`if (Get-NetFirewallRule -Name ${q(r.name)} -ErrorAction SilentlyContinue) { Set-NetFirewallRule -Name ${q(r.name)} -Enabled True -Action Allow -Direction Inbound -Profile Any }`
-      + ` else { New-NetFirewallRule -Name ${q(r.name)} -DisplayName ${q(r.display)} -Direction Inbound -Protocol ${r.protocol} -LocalPort ${r.port} -Action Allow -Profile Any | Out-Null }`);
+    lines.push(`if (Get-NetFirewallRule -Name ${q(r.name)} -ErrorAction SilentlyContinue) { Set-NetFirewallRule -Name ${q(r.name)} -Enabled True -Action Allow -Direction Inbound -Profile Any -RemoteAddress ${remote} }`
+      + ` else { New-NetFirewallRule -Name ${q(r.name)} -DisplayName ${q(r.display)} -Direction Inbound -Protocol ${r.protocol} -LocalPort ${r.port} -Action Allow -Profile Any -RemoteAddress ${remote} | Out-Null }`);
   }
   return lines.join('\n');
 }
@@ -463,6 +470,7 @@ export const STEPS = [
       const parts = [];
       if (missing.length) parts.push(`thiếu luật cho ${missing.map((r) => `${r.protocol} ${r.port}`).join(', ')}`);
       if (fw.block.length) parts.push(`${fw.block.length} luật đang CHẶN node.exe (do từng bấm Huỷ ở hộp thoại tường lửa)`);
+      if (fw.open?.length) parts.push(`${fw.open.length} luật còn mở cho mọi địa chỉ (nên chỉ mạng nội bộ và Tailscale)`);
       return { ok: !parts.length, detail: parts.join('; ') || firewallRules(ctx).map((r) => `${r.protocol} ${r.port}`).join(', ') + ' đã mở' };
     },
     fix: (ctx) => {

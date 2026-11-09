@@ -365,3 +365,16 @@ test('tắt máy: đúng lệnh shutdown, có lịch cũ thì huỷ rồi đặt
   for (const bad of [-1, 1.5, 'abc', p.MAX_DELAY_SEC + 1]) assert.throws(() => p.shutdownArgs(bad));
   assert.throws(() => p.scheduleShutdown(10, exec, 'linux'), /chỉ làm cho Windows/);
 });
+test('tường lửa: luật của Orbit chỉ mở cho mạng nội bộ và Tailscale, cả khi tạo mới lẫn khi sửa luật đã có', async () => {
+  const { firewallScript, FIREWALL_REMOTE } = await import('../src/setup.mjs');
+  assert.deepEqual(FIREWALL_REMOTE, ['LocalSubnet', '100.64.0.0/10', 'fd7a:115c:a1e0::/48']);
+  const script = firewallScript({ role: 'hub', hubPort: 8795 }, ['ChanNode']);
+  const want = "-RemoteAddress 'LocalSubnet','100.64.0.0/10','fd7a:115c:a1e0::/48'";
+  for (const name of ['OrbitRemote-Screen-TCP', 'OrbitRemote-Hub-TCP', 'OrbitRemote-Hub-UDP']) {
+    const line = script.split('\n').find((l) => l.includes(`'${name}'`));
+    assert.ok(line, name);
+    assert.equal(line.split(want).length - 1, 2, `${name}: cả Set- (luật đã có) và New- (luật mới) đều giới hạn địa chỉ`);
+  }
+  assert.ok(script.includes("Disable-NetFirewallRule -Name 'ChanNode'"));
+  assert.ok(!/RemoteAddress\s+Any/i.test(script));
+});
