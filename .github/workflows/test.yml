@@ -1,0 +1,34 @@
+# Chạy toàn bộ phép kiểm (npm test) trên Windows, nền chính của Orbit Remote, mỗi lần đẩy lên main hay mở PR.
+# Node 24 là bản các máy đang chạy: phải qua. Node 20 là bản thấp nhất ghi trong package.json (engines): chạy để
+# biết, chưa bắt buộc qua cho tới khi được kiểm trên máy thật.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: '24'
+            experimental: false
+          - node: '20'
+            experimental: true
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --version
+      - run: npm test
