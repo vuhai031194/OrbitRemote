@@ -13,7 +13,7 @@
 
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { childEnv, resolveClaude } from './claude-session.mjs';
+import { childEnv, claudeSpawn } from './claude-session.mjs';
 
 const STATUS_MS = 20000;
 const URL_WAIT_MS = 20000;
@@ -23,12 +23,12 @@ const OUT_KEEP = 8000;
 
 // command: lệnh Claude Code của đầu máy, chuỗi ("claude") hay mảng (["node", "fake-claude.mjs"] khi kiểm).
 function launch(command, args) {
-  const [cmd, ...prefix] = Array.isArray(command) ? command : [resolveClaude(command)];
-  return spawn(cmd, [...prefix, ...args], {
+  const [file, argv, extra] = claudeSpawn(command, args); // không qua vỏ lệnh (claude-session.mjs)
+  return spawn(file, argv, {
     env: childEnv({ BROWSER: 'none' }),
     windowsHide: true,
-    shell: /\.(cmd|bat)$/i.test(cmd),
     stdio: ['pipe', 'pipe', 'pipe'],
+    ...extra,
   });
 }
 

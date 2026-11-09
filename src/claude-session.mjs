@@ -14,8 +14,8 @@
 
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { existsSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { delimiter, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { modelName, resolveModel } from './models.mjs';
@@ -44,7 +44,7 @@ export const RC_ENABLE_MS = 60000;
 const INPUT_PREVIEW = 4000;
 
 // Tìm đúng file chạy của Claude Code. Trên Windows bản cài gốc là claude.exe, bản cài
-// qua npm là claude.cmd; file .cmd phải chạy qua vỏ lệnh, file .exe thì không được.
+// qua npm là claude.cmd (xem claudeSpawn: không chạy nó qua vỏ lệnh).
 export function resolveClaude(command = process.env.ORBIT_REMOTE_CLAUDE || 'claude') {
   if (command.includes('/') || command.includes('\\')) return command;
   const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
@@ -56,6 +56,51 @@ export function resolveClaude(command = process.env.ORBIT_REMOTE_CLAUDE || 'clau
   }
   return command;
 }
+
+// Vỏ .cmd mà npm dựng (cmd-shim) chỉ gọi tiếp một chương trình nằm cạnh nó, ở dòng có "%*":
+//   bản mới: "%dp0%\node_modules\@anthropic-ai\claude-code\bin\claude.exe"   %*
+//   bản cũ:  "%_prog%"  "%dp0%\node_modules\@anthropic-ai\claude-code\cli.js" %*
+// Trả lệnh thật để chạy thẳng ([exe] hay [node, script]), hoặc null nếu không nhận ra.
+export function unwrapCmdShim(file, { read = (f) => readFileSync(f, 'utf8'), exists = existsSync, node = process.execPath } = {}) {
+  let text;
+  try {
+    text = read(file);
+  } catch {
+    return null;
+  }
+  const line = String(text).split(/\r?\n/).reverse().find((l) => l.includes('%*'));
+  if (!line) return null;
+  const targets = [...line.matchAll(/"%~?dp0%?\\?([^"]+)"/gi)].map((m) => join(dirname(file), m[1]));
+  const target = targets.pop();
+  if (!target || !exists(target)) return null;
+  if (/\.exe$/i.test(target)) return [target];
+  if (/\.[cm]?js$/i.test(target)) return [node, target];
+  return null;
+}
+
+// Bọc tham số cho cmd.exe y như cross-spawn (thư viện npm dùng rộng rãi cho đúng việc này): ngoặc kép theo luật
+// của chương trình C, rồi thêm "^" trước mọi ký tự đặc biệt của cmd; vỏ .cmd đọc lại %* lần nữa nên thêm hai lần.
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+function cmdArg(arg) {
+  let s = String(arg).replace(/\r?\n/g, ' '); // cmd.exe không chuyển được tham số nhiều dòng
+  s = s.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"').replace(/(?=(\\+?)?)\1$/, '$1$1');
+  return `"${s}"`.replace(CMD_META, '^$1').replace(CMD_META, '^$1');
+}
+
+// [chương trình, tham số, tuỳ chọn spawn] để chạy Claude Code mà không bao giờ để vỏ lệnh tự cắt tham số.
+// Chạy claude.cmd bằng `shell: true` thì Node nối tham số bằng dấu cách, không bọc gì: "--name Phiên mới" thành
+// hai tham số, lời dặn hệ thống chỉ còn chữ đầu, và "&", "|" trong tên phiên thành lệnh của cmd.
+export function claudeSpawn(command, args, { platform = process.platform, ...shim } = {}) {
+  const [cmd, ...prefix] = Array.isArray(command) ? command : [resolveClaude(command)];
+  const all = [...prefix, ...args];
+  if (platform !== 'win32' || !/\.(cmd|bat)$/i.test(cmd)) return [cmd, all, {}];
+  const real = unwrapCmdShim(cmd, shim);
+  if (real) return [real[0], [...real.slice(1), ...all], {}];
+  const line = [String(cmd).replace(CMD_META, '^$1'), ...all.map(cmdArg)].join(' ');
+  return [process.env.comspec || 'cmd.exe', ['/d', '/s', '/c', `"${line}"`], { windowsVerbatimArguments: true }];
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function childEnv(extra = {}) {
   const env = { ...process.env };
@@ -119,13 +164,15 @@ export class ClaudeSession extends EventEmitter {
   constructor(spec) {
     super();
     this.id = spec.id || randomUUID();
+    // Mã phiên và effort đi thẳng vào dòng lệnh của Claude Code: chỉ nhận đúng dạng.
+    if (spec.claudeSessionId && !UUID.test(spec.claudeSessionId)) throw new Error('Mã phiên Claude không hợp lệ.');
     this.claudeSessionId = spec.claudeSessionId || randomUUID();
     this.resume = Boolean(spec.resume);
     this.fork = Boolean(spec.fork);
     this.name = spec.name || 'Phiên mới';
     this.cwd = spec.cwd;
     this.model = spec.model || '';
-    this.effort = spec.effort || '';
+    this.effort = EFFORT_LEVELS.includes(spec.effort) ? spec.effort : '';
     this.permissionMode = PERMISSION_MODES.includes(spec.permissionMode) ? spec.permissionMode : 'manual';
     this.claudeCommand = spec.claudeCommand;
     this.extraArgs = spec.extraArgs || [];
@@ -181,21 +228,18 @@ export class ClaudeSession extends EventEmitter {
   }
 
   start() {
-    // Lệnh dạng mảng (["node", "fake-claude.mjs"]) để phép kiểm chạy bản giả mà không cần vỏ lệnh.
-    const [command, ...prefix] = Array.isArray(this.claudeCommand)
-      ? this.claudeCommand
-      : [resolveClaude(this.claudeCommand)];
-    const needsShell = /\.(cmd|bat)$/i.test(command);
+    // Lệnh dạng mảng (["node", "fake-claude.mjs"]) để phép kiểm chạy bản giả; claudeSpawn không để vỏ lệnh cắt tham số.
     // Ép phát trạng thái ngay cả khi vẫn là "starting": trạm phải biết phiên tồn tại TRƯỚC
     // sự kiện đầu tiên của nó, nếu không sự kiện ấy rơi vào khoảng không.
     this.setStatus('starting', true);
     try {
-      this.proc = spawn(command, [...prefix, ...this.buildArgs()], {
+      const [file, argv, extra] = claudeSpawn(this.claudeCommand, this.buildArgs());
+      this.proc = spawn(file, argv, {
         cwd: this.cwd,
         env: childEnv(this.env),
         windowsHide: true,
-        shell: needsShell,
         stdio: ['pipe', 'pipe', 'pipe'],
+        ...extra,
       });
     } catch (err) {
       this.fail(`Không chạy được Claude Code: ${err.message}`);
