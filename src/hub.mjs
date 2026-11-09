@@ -822,6 +822,48 @@ export class Hub extends EventEmitter {
     return this.sessionRpc(id).request({ op: 'session_file', id, path: String(path), offset, ...(head ? { head: true } : {}) });
   }
 
+  // ---- Tệp trong thư mục làm việc của phiên (nút "Tệp" trên app, files.mjs) ----------------------------------
+  // Gốc luôn do trạm chọn từ bản ghi của phiên, app chỉ đưa đường tương đối trong gốc; đầu máy kiểm không ra ngoài gốc.
+  // Phiên làm việc trên máy khác (snap.remote) thì tệp nằm ở máy đó, trong thư mục dự án trên máy đó.
+  filesPlace(id) {
+    const { snap } = this.record(id);
+    const place = snap.remote?.machineId ? { machineId: snap.remote.machineId, root: snap.remote.cwd } : { machineId: snap.machineId, root: snap.cwd };
+    if (!place.root) throw new Error('Phiên này không có thư mục làm việc.');
+    return place;
+  }
+
+  async filesRequest(machineId, message) {
+    try {
+      return await this.machineRpc(machineId).request(message);
+    } catch (err) {
+      if (/không hiểu lệnh/.test(err.message)) throw new Error('Máy này cần setup bản Orbit Remote mới để xem tệp của phiên.');
+      throw err;
+    }
+  }
+
+  // Một tầng thư mục `path` (tương đối, '' là gốc): { root, path, entries, more }.
+  sessionFiles(id, path = '') {
+    const { machineId, root } = this.filesPlace(id);
+    return this.filesRequest(machineId, { op: 'files', root, path: String(path || '').slice(0, 1000) });
+  }
+
+  // Một khúc của tệp `path` trong thư mục của phiên: { size, mtime, offset, data }; head: chỉ cỡ và giờ sửa.
+  readSessionTreeFile(id, path, offset = 0, head = false) {
+    const { machineId, root } = this.filesPlace(id);
+    return this.filesRequest(machineId, { op: 'files_read', root, path: String(path || '').slice(0, 1000), offset, ...(head ? { head: true } : {}) });
+  }
+
+  // Như trên cho phiên ngoài app (màn chỉ xem): đầu máy tự tìm thư mục làm việc trong nhật ký của phiên.
+  transcriptFiles(machineId, claudeSessionId, path = '') {
+    if (!/^[0-9a-f-]{36}$/i.test(String(claudeSessionId || ''))) throw new Error('Mã phiên không hợp lệ.');
+    return this.filesRequest(machineId, { op: 'files', claudeSessionId, path: String(path || '').slice(0, 1000) });
+  }
+
+  readTranscriptFile(machineId, claudeSessionId, path, offset = 0, head = false) {
+    if (!/^[0-9a-f-]{36}$/i.test(String(claudeSessionId || ''))) throw new Error('Mã phiên không hợp lệ.');
+    return this.filesRequest(machineId, { op: 'files_read', claudeSessionId, path: String(path || '').slice(0, 1000), offset, ...(head ? { head: true } : {}) });
+  }
+
   // Vé xem màn hình: đầu máy cấp, app dùng để nối thẳng tới máy (screen.mjs).
   screenTicket(machineId) {
     return this.machineRpc(machineId).request({ op: 'screen_ticket' });

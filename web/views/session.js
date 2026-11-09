@@ -16,6 +16,7 @@ import { openSessionMenu, openSheet, MODES, EFFORTS } from './sheets.js';
 import { modelOptions, sessionModel } from '../lib/models.js';
 import { attachmentIcon, attachmentKind, openAttachment } from './viewer.js';
 import { attachMentions } from './mention.js';
+import { openSessionFiles } from './files.js';
 
 const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
 const NEAR_BOTTOM_PX = 140;
@@ -118,6 +119,8 @@ export function mountSession(root, id, opts = {}) {
       leading(),
       h('button', { class: 'title-wrap', onclick: () => openSessionMenu(id) }, title, subtitle),
       pill,
+      // Nút "Tệp": cây thư mục làm việc của phiên trên máy, chạm tệp để xem (views/files.js).
+      h('button', { class: 'icon-btn', 'aria-label': 'Tệp của phiên', title: 'Tệp', onclick: () => openSessionFiles(store.sessions.get(id) || session) }, icon('folder', 20)),
       // Phiên nổi nằm trên màn của máy: mở đầy đủ thì quay lại vẫn về màn máy đó.
       floating ? h('a', { class: 'icon-btn', href: `#/s/${id}/m/${session.machineId}`, 'aria-label': 'Mở phiên đầy đủ', title: 'Mở phiên đầy đủ' }, icon('external', 19)) : machineBtn,
       h('button', { class: 'icon-btn', 'aria-label': 'Tuỳ chọn', onclick: () => openSessionMenu(id) }, icon('more')),

@@ -229,6 +229,12 @@ function transcriptOf(claudeSessionId) {
   }
 }
 
+// Thư mục làm việc của một phiên theo nhật ký của nó (cách tính như danh sách phiên cũ), '' khi không thấy: để xem
+// tệp của phiên đang mở ngoài app hay đã đóng (nút "Tệp" ở màn chỉ xem).
+export function transcriptCwd(claudeSessionId) {
+  return transcriptOf(String(claudeSessionId || ''))?.d.head.cwd || '';
+}
+
 // Phiên đang mở ngoài app (VS Code, terminal), trừ các mã trong `exclude` (phiên do app giữ).
 // Có sổ phiên thì lấy đúng phiên đang chạy, dù đã ngồi yên bao lâu; không có thì lấy nhật ký được
 // ghi trong `windowMs` vừa qua.

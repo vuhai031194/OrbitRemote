@@ -16,6 +16,7 @@ import { STATUS_LABEL } from './home.js';
 import { claudeAccountBlock } from './claude-login.js';
 import { mountScreenPanel } from './screen.js';
 import { mountSession } from './session.js';
+import { openTranscriptFiles } from './files.js';
 
 const RUNNING = new Set(['starting', 'idle', 'busy', 'waiting']);
 const WATCH_MS = 8000; // nhịp xem lại nhật ký của phiên ngoài app khi màn đang mở
@@ -1124,11 +1125,14 @@ export function mountExternal(root, machineId, csid) {
   const title = h('div', { class: 'title' });
   const subtitle = h('div', { class: 'subtitle' });
   const more = h('button', { class: 'icon-btn hidden', 'aria-label': 'Thao tác', onclick: () => { const e = findEntry(); if (e) openExternalSheet(machineId, e); } }, icon('more'));
+  // Nút "Tệp": cây thư mục làm việc của phiên (đầu máy tìm thư mục trong nhật ký của phiên), chạm tệp để xem.
+  const files = h('button', { class: 'icon-btn', 'aria-label': 'Tệp của phiên', title: 'Tệp', onclick: () => openTranscriptFiles(machineId, csid, findEntry()?.cwd || '') }, icon('folder', 20));
   const barText = h('span');
   const view = h('div', { class: 'view external' },
     h('header', { class: 'topbar' },
       h('a', { class: 'icon-btn', href: `#/m/${machineId}`, 'aria-label': 'Quay lại' }, icon('back')),
       h('div', { class: 'title-wrap static' }, title, subtitle),
+      files,
       more),
     h('div', { class: 'readonly-bar' }, icon('history', 14), barText),
     timeline);

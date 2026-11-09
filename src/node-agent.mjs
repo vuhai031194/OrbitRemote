@@ -25,11 +25,12 @@ import { ScreenServer, ffmpegCommand } from './screen.mjs';
 import { InputHelper } from './input.mjs';
 import { controlTimeoutMs, remoteOp } from './remote-ops.mjs';
 import { Sensors } from './sensors.mjs';
-import { findTranscript, listExternalSessions, listTranscripts, listTrash, loadHistory, transcriptAction, transcriptBin } from './transcripts.mjs';
+import { findTranscript, listExternalSessions, listTranscripts, listTrash, loadHistory, transcriptAction, transcriptBin, transcriptCwd } from './transcripts.mjs';
 import { forgetUsage, readClaudeUsage } from './usage.mjs';
 import { ClaudeLogin, authStatus } from './claude-auth.mjs';
 import { TokenCounter, tokenSum } from './claude-tokens.mjs';
 import { listDirs } from './dirs.mjs';
+import { listFiles, readFileChunk } from './files.mjs';
 import { gitInfo, pullTo, readTranscript, wipPush, writeTranscript } from './move-node.mjs';
 import { findToken } from './tokens.mjs';
 import { applyTable } from './models.mjs';
@@ -467,6 +468,12 @@ export class NodeAgent {
         return reply(() => ({ changed: applyTable(message.table) }));
       case 'set_model':
         return reply(() => this.mustGet(message.id).setModel(message.model));
+      // Tệp trong thư mục làm việc của một phiên (nút "Tệp", files.mjs): root là thư mục trạm đưa xuống (phiên app giữ);
+      // phiên ngoài app thì trạm chỉ đưa mã phiên Claude, đầu máy tự tìm thư mục trong nhật ký của phiên đó.
+      case 'files':
+        return reply(() => listFiles(this.filesRoot(message), String(message.path || '')));
+      case 'files_read':
+        return reply(() => readFileChunk(this.filesRoot(message), String(message.path || ''), message.offset, Boolean(message.head)));
       case 'dirs':
         return reply(() => listDirs(String(message.path || '').slice(0, 1000))); // duyệt thư mục làm việc (dirs.mjs)
       case 'transcripts':
@@ -653,6 +660,12 @@ export class NodeAgent {
     } finally {
       await fh.close();
     }
+  }
+
+  // Gốc để xem tệp (op 'files', 'files_read'): thư mục trạm đưa xuống, hay thư mục trong nhật ký của phiên ngoài app.
+  filesRoot({ root, claudeSessionId }) {
+    if (claudeSessionId) return transcriptCwd(claudeSessionId) || fail('Không tìm thấy thư mục làm việc của phiên này trong nhật ký.');
+    return String(root || '');
   }
 
   // Một khúc của một tệp trên máy này mà Claude nhắc tới trong câu trả lời (link file:///, đường dẫn tuyệt đối):

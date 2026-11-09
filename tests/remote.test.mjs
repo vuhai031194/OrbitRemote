@@ -1289,6 +1289,63 @@ test('duyệt thư mục khi mở phiên: app hỏi qua trạm, đầu máy đ�
   assert.equal((await fetch(`http://127.0.0.1:${port}/api/machines/mA/dirs`)).status, 401);
 });
 
+test('nút "Tệp": app xem cây thư mục và mở tệp trong thư mục làm việc của phiên, không ra ngoài được; chưa ghép đôi thì bị chặn', async () => {
+  const dir = join(ROOT, 'du an tep'); // ngoài WORK: bài duyệt thư mục đếm thư mục con của WORK
+  mkdirSync(join(dir, 'docs'), { recursive: true });
+  mkdirSync(join(dir, 'node_modules'), { recursive: true });
+  writeFileSync(join(dir, 'docs', 'bao cao.md'), '# Báo cáo\n');
+  writeFileSync(join(ROOT, 'ngoai-du-an.txt'), 'không được đọc');
+  const created = await call('/api/sessions', { machineId: 'mA', cwd: dir, name: 'xem tệp' });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const id = created.data.id;
+  try {
+    const top = await call(`/api/sessions/${id}/tree`);
+    assert.equal(top.status, 200, JSON.stringify(top.data));
+    assert.equal(top.data.path, '');
+    assert.deepEqual(top.data.entries.map((e) => [e.name, e.kind, Boolean(e.heavy)]), [['docs', 'dir', false], ['node_modules', 'dir', true]]);
+    const docs = await call(`/api/sessions/${id}/tree?p=docs`);
+    assert.deepEqual(docs.data.entries.map((e) => e.name), ['bao cao.md']);
+
+    const file = (p, headers = {}) => fetch(`http://127.0.0.1:${port}/api/sessions/${id}/tree-file?p=${encodeURIComponent(p)}`, { headers: { Cookie: cookie, ...headers } });
+    const res = await file('docs/bao cao.md');
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'text/plain; charset=utf-8', '.md phát như chữ, app tự dựng định dạng');
+    assert.match(res.headers.get('content-security-policy'), /sandbox/);
+    assert.equal(await res.text(), '# Báo cáo\n');
+    assert.equal((await file('docs/bao cao.md', { 'If-None-Match': res.headers.get('etag') })).status, 304);
+
+    const out = await file('../ngoai-du-an.txt');
+    assert.equal(out.status, 404, 'ra ngoài thư mục của phiên thì không đọc');
+    assert.match((await out.json()).error, /Chỉ xem được tệp trong thư mục làm việc/);
+    assert.equal((await file(join(ROOT, 'ngoai-du-an.txt'))).status, 404, 'đường tuyệt đối cũng không');
+    assert.notEqual((await call(`/api/sessions/${id}/tree?p=..`)).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/tree`)).status, 401);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/tree-file?p=docs/bao%20cao.md`)).status, 401);
+    assert.notEqual((await call('/api/machines/mA/tree/khong-phai-ma')).status, 200, 'mã phiên ngoài app phải đúng dạng');
+
+    // Màn chỉ xem một phiên ngoài app: trạm chỉ đưa mã phiên, đầu máy lấy thư mục làm việc trong nhật ký của phiên.
+    const csid = 'aaaaaaaa-2222-3333-4444-555555555555';
+    const log = join(process.env.ORBIT_REMOTE_PROJECTS, 'du-an-tep', `${csid}.jsonl`);
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, `${JSON.stringify({ type: 'user', cwd: dir, message: { role: 'user', content: 'xem tệp' } })}\n`);
+    try {
+      const ext = await call(`/api/machines/mA/tree/${csid}?p=docs`);
+      assert.equal(ext.status, 200, JSON.stringify(ext.data));
+      assert.deepEqual(ext.data.entries.map((e) => e.name), ['bao cao.md']);
+      const extFile = (p) => fetch(`http://127.0.0.1:${port}/api/machines/mA/tree-file/${csid}?p=${encodeURIComponent(p)}`, { headers: { Cookie: cookie } });
+      assert.equal(await (await extFile('docs/bao cao.md')).text(), '# Báo cáo\n');
+      assert.equal((await extFile('../ngoai-du-an.txt')).status, 404, 'phiên ngoài app cũng không ra ngoài thư mục của nó');
+      const unknown = await call('/api/machines/mA/tree/bbbbbbbb-2222-3333-4444-555555555555');
+      assert.notEqual(unknown.status, 200);
+      assert.match(unknown.data.error, /Không tìm thấy thư mục làm việc/);
+    } finally {
+      rmSync(log, { force: true }); // không để lại một "phiên ngoài app" cho các bài sau
+    }
+  } finally {
+    await call(`/api/sessions/${id}/close`, {});
+  }
+});
+
 // Vỏ MCP thật của một phiên (đúng chương trình phiên Claude chạy), trỏ vào ống của máy A.
 function mcpAs(sessionId) {
   const proc = spawn(process.execPath, [join(HERE, '..', 'src', 'mcp-server.mjs')], {

@@ -301,6 +301,15 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
     oldMsg: 'Máy chạy phiên này cần setup bản Orbit Remote mới để mở tệp phiên nhắc tới.',
   });
 
+  // Tệp trong thư mục làm việc của phiên (nút "Tệp" trên app): path là đường tương đối trong thư mục đó; read đọc qua
+  // trạm (hub.readSessionTreeFile, hay hub.readTranscriptFile cho phiên ngoài app).
+  const sendTreeFile = (req, res, path, read) => sendRemoteFile(req, res, {
+    read: (offset, head) => read(path, offset, head),
+    name: path.split(/[\\/]/).pop() || 'tep',
+    fixed: false,
+    oldMsg: 'Máy này cần setup bản Orbit Remote mới để xem tệp của phiên.',
+  });
+
   async function api(req, res, url, device) {
     const path = url.pathname;
     const parts = path.split('/').filter(Boolean); // ['api', ...]
@@ -335,6 +344,13 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
       }
       if (method === 'GET' && id && action === 'file') {
         return sendSessionFile(req, res, id, String(url.searchParams.get('p') || '').slice(0, 1000));
+      }
+      // Nút "Tệp": một tầng thư mục, và một tệp, trong thư mục làm việc của phiên (p: đường tương đối, trống là gốc).
+      if (method === 'GET' && id && action === 'tree') {
+        return sendJson(res, 200, await hub.sessionFiles(id, String(url.searchParams.get('p') || '').slice(0, 1000)));
+      }
+      if (method === 'GET' && id && action === 'tree-file') {
+        return sendTreeFile(req, res, String(url.searchParams.get('p') || '').slice(0, 1000), (p, offset, head) => hub.readSessionTreeFile(id, p, offset, head));
       }
       // Lần chuyển máy gần nhất của phiên (session-move.mjs): app mở lại bảng chuyển thì thấy tiếp tiến độ.
       if (method === 'GET' && id && action === 'move') {
@@ -435,6 +451,14 @@ export function createServer({ hub, auth, localSecret, version, hubInfo = () => 
       }
       if (method === 'GET' && parts[3] === 'dirs') return sendJson(res, 200, await hub.machineDirs(machineId, url.searchParams.get('path') || ''));
       if (method === 'GET' && parts[3] === 'temps') return sendJson(res, 200, await hub.machineTemps(machineId));
+      // Nút "Tệp" ở màn chỉ xem một phiên ngoài app: GET /api/machines/<máy>/tree/<mã phiên>?p=, .../tree-file/<mã phiên>?p=
+      if (method === 'GET' && parts[3] === 'tree' && parts[4]) {
+        return sendJson(res, 200, await hub.transcriptFiles(machineId, parts[4], String(url.searchParams.get('p') || '').slice(0, 1000)));
+      }
+      if (method === 'GET' && parts[3] === 'tree-file' && parts[4]) {
+        const csid = parts[4];
+        return sendTreeFile(req, res, String(url.searchParams.get('p') || '').slice(0, 1000), (p, offset, head) => hub.readTranscriptFile(machineId, csid, p, offset, head));
+      }
       if (method === 'GET' && parts[3] === 'history' && parts[4]) {
         return sendJson(res, 200, await hub.machineHistory(machineId, parts[4], Number(url.searchParams.get('since')) || 0));
       }
