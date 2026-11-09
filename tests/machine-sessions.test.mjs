@@ -338,3 +338,27 @@ test('màn chính: mỗi máy hiện đúng một lần (máy đang bật có ph
     store.groups = saved.groups;
   }
 });
+
+test('thẻ phiên ở màn chính: duyệt ngay (Cho phép, Từ chối) mà không mở phiên; báo số yêu cầu còn lại; hiện chi phí', async () => {
+  const { sessionCard } = await import('../web/views/home.js');
+  if (typeof globalThis.requestAnimationFrame !== 'function') define('requestAnimationFrame', (fn) => setTimeout(fn, 0)); // toast cần
+  calls.length = 0;
+  reply = () => ({ ok: true });
+  try {
+    const s = { id: 'sP', machineId: 'm1', name: 'Phiên duyệt', status: 'waiting', costUsd: 1.234, lastActivity: '2026-11-09T10:00:00Z',
+      pending: [{ requestId: 'r1', tool: 'Bash', summary: 'npm test' }, { requestId: 'r2', tool: 'Edit' }] };
+    const card = sessionCard(s);
+    assert.match(card.find('card-pending-text').text(), /Cần duyệt: Bash · npm test \(\+1\)/);
+    assert.match(card.find('card-meta').text(), /\$1\.23/);
+    const [deny, allow] = card.find('card-pending-actions').children;
+    let prevented = false;
+    let stopped = false;
+    await allow.listeners.click[0]({ preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }, currentTarget: allow });
+    assert.ok(prevented && stopped, 'bấm nút không làm thẻ (liên kết) chuyển màn');
+    assert.ok(calls.includes('/api/sessions/sP/permission'));
+    assert.equal(deny.text(), 'Từ chối');
+    assert.equal(sessionCard({ ...s, costUsd: 0.001, pending: [] }).find('card-meta').text().includes('$'), false, 'chưa tốn gì thì khỏi hiện');
+  } finally {
+    reply = null;
+  }
+});

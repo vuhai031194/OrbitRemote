@@ -2795,3 +2795,9 @@ html.float-moving, html.float-moving * { cursor: var(--float-cursor, grabbing) !
 
 /* Nhật ký của máy (machines.js openLogs): chữ đơn cách, cuộn trong khung, xuống dòng khi dòng quá dài. */
 .log-view { max-height: 55vh; overflow: auto; margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font: 0.78em/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+
+/* Duyệt ngay trên thẻ phiên ở màn chính (home.js pendingRow): chữ và hai nút, xuống dòng khi hẹp. */
+.card-pending { display: flex; flex-wrap: wrap; border-radius: 12px; padding: 6px 6px 6px 10px; }
+.card-pending-text { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-pending-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.card-pending-actions .btn { min-height: 36px; }

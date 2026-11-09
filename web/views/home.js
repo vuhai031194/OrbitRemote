@@ -1,7 +1,7 @@
 // Màn chính: máy mới xin nối, nút tuỳ biến, cây máy và phiên (Online, Offline; views/tree.js), và nút mở
 // phiên mới. Thẻ phiên kéo thả được vào khối nhóm (lib/drag.js).
 
-import { h, clear, timeAgo, baseName, workDir, workPlace } from '../lib/dom.js';
+import { h, clear, timeAgo, baseName, workDir, workPlace, toast } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
 import { store } from '../lib/store.js';
 import { api } from '../lib/api.js';
@@ -48,10 +48,37 @@ export function topbarBrand() {
 }
 
 // showMachine: thẻ nằm dưới nhãn máy của nó thì khỏi nhắc lại tên máy.
+// Yêu cầu duyệt trên thẻ phiên: duyệt ngay ở màn chính, khỏi mở phiên (yêu cầu đầu tiên; còn nữa thì báo số). Thẻ là
+// một liên kết, nên nút chặn việc chuyển màn. Từ chối kèm lý do, hay "luôn cho phép": mở phiên.
+export function pendingRow(s) {
+  const p = s.pending[0];
+  const more = s.pending.length > 1 ? ` (+${s.pending.length - 1})` : '';
+  let row = null;
+  const answer = (behavior) => async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    row.classList.add('busy');
+    try {
+      await api.post(`/api/sessions/${s.id}/permission`, { requestId: p.requestId, behavior });
+      toast(behavior === 'allow' ? `Đã cho phép ${p.tool}.` : `Đã từ chối ${p.tool}.`);
+    } catch (err) {
+      row.classList.remove('busy');
+      toast(err.message, 'error');
+    }
+  };
+  return row = h('div', { class: 'card-pending' },
+    h('span', { class: 'card-pending-text' }, icon('shield', 14), `Cần duyệt: ${p.tool}${p.summary ? ` · ${p.summary}` : ''}${more}`),
+    h('span', { class: 'card-pending-actions' },
+      h('button', { class: 'btn small ghost', type: 'button', onclick: answer('deny') }, 'Từ chối'),
+      h('button', { class: 'btn small primary', type: 'button', onclick: answer('allow') }, 'Cho phép')));
+}
+
 export function sessionCard(s, { showMachine = true } = {}) {
   const machine = store.machines.get(s.machineId);
   const offline = machine && !machine.online && RUNNING.has(s.status);
-  const meta = [showMachine ? workPlace(s) : s.remote?.machine ? `→ ${s.remote.machine}` : '', baseName(workDir(s)), sessionModel(s)].filter(Boolean).join(' · ');
+  // Chi phí của phiên (Claude Code báo theo từng lượt): trước đây chỉ thấy trong bảng cài đặt của phiên.
+  const cost = s.costUsd >= 0.005 ? `$${s.costUsd.toFixed(2)}` : '';
+  const meta = [showMachine ? workPlace(s) : s.remote?.machine ? `→ ${s.remote.machine}` : '', baseName(workDir(s)), sessionModel(s), cost].filter(Boolean).join(' · ');
   const team = store.groupOf(s.id);
   const role = team?.members.find((m) => m.id === s.id)?.role;
   return h('a', { class: `card session-card status-${s.status}${offline ? ' offline' : ''}${isOpenSession(s.id) ? ' current' : ''}`, href: `#/s/${s.id}`, 'data-sid': s.id },
@@ -62,9 +89,7 @@ export function sessionCard(s, { showMachine = true } = {}) {
       h('span', { class: 'card-time' }, timeAgo(s.lastActivity))),
     h('div', { class: 'card-meta' }, meta),
     s.lastText ? h('div', { class: 'card-preview' }, s.lastText) : null,
-    s.pending?.length
-      ? h('div', { class: 'card-pending' }, icon('shield', 14), `Cần duyệt: ${s.pending.map((p) => p.tool).join(', ')}`)
-      : null,
+    s.pending?.length ? pendingRow(s) : null,
     offline && showMachine ? h('div', { class: 'card-offline' }, `Máy ${s.machine} đang mất kết nối`) : null);
 }
 
